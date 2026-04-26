@@ -37,7 +37,7 @@ export default function App() {
 function Splash() {
   return (
     <div style={S.center}>
-      <div style={{ fontSize: 40, marginBottom: 12 }}>🍱</div>
+      <img src="/favicon.png" alt="おうちキッチン" style={{ width: 72, height: 72, marginBottom: 12, borderRadius: 16 }} />
       <div style={{ color: '#718096', fontSize: 14 }}>読み込み中…</div>
     </div>
   );
@@ -52,7 +52,7 @@ function Login({ denied }) {
   return (
     <div style={S.loginBg}>
       <div style={S.loginCard}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>🍱</div>
+        <img src="/favicon.png" alt="おうちキッチン" style={{ width: 96, height: 96, marginBottom: 12, borderRadius: 22 }} />
         <div style={S.loginTitle}>おうちキッチン</div>
         <div style={S.loginSub}>食材管理 &amp; 献立提案</div>
         {denied && (
