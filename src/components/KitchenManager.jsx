@@ -27,6 +27,23 @@ const DEFAULT_SETTINGS = {
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
 const FISH_KEYWORDS  = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
 
+const CATEGORY_MAP = [
+  { icon:"🥩", color:"#FC8181", bg:"#FFF5F5", keys:["鶏","豚","牛","ひき肉","ベーコン","ソーセージ","ハム","ラム","合い挽き","唐揚げ","焼き鳥","肉団子","ミートボール","餃子","シュウマイ","春巻き"] },
+  { icon:"🐟", color:"#4299E1", bg:"#EBF8FF", keys:["魚","サバ","鮭","サーモン","えび","エビ","タコ","イカ","アサリ","ツナ","マグロ","アジ","ブリ","タラ","イワシ","サンマ","ししゃも","魚介","シーフード","西京","塩サバ"] },
+  { icon:"🥦", color:"#48BB78", bg:"#F0FFF4", keys:["キャベツ","玉ねぎ","にんじん","もやし","ほうれん草","トマト","じゃがいも","大根","ブロッコリー","なす","ピーマン","きゅうり","レタス","白菜","ごぼう","れんこん","さつまいも","かぼちゃ","アスパラ","ねぎ","しょうが","にんにく","セロリ","水菜","小松菜","春菊","チンゲン菜","コーン"] },
+  { icon:"🥚", color:"#ECC94B", bg:"#FFFFF0", keys:["卵","牛乳","チーズ","ヨーグルト","バター","クリーム"] },
+  { icon:"🫘", color:"#68D391", bg:"#F0FFF4", keys:["豆腐","納豆","豆","油揚げ","厚揚げ","大豆","おから"] },
+  { icon:"🍄", color:"#A0AEC0", bg:"#F7FAFC", keys:["しいたけ","えのき","まいたけ","なめこ","きのこ","エリンギ","しめじ"] },
+  { icon:"🍚", color:"#F6AD55", bg:"#FFFAF0", keys:["米","うどん","そば","パスタ","麺","パン","餅","ごはん","チャーハン","ピラフ"] },
+];
+
+function getCategoryIcon(name) {
+  for (const cat of CATEGORY_MAP) {
+    if (cat.keys.some(k => name.includes(k))) return cat;
+  }
+  return { icon:"🫙", color:"#A0AEC0", bg:"#F7FAFC" };
+}
+
 function parseRecipes(text) {
   const blocks = text.split(/(?=\d+[.．]\s*【)/m).filter(Boolean);
   if (blocks.length < 2) return [{ title: "今日の献立提案", content: text }];
@@ -518,6 +535,9 @@ export default function KitchenManager({ user }) {
                         <div style={S.itemList}>
                           {items.map(item=>(
                             <div key={item.id} style={S.item} className="item-row">
+                              {(() => { const cat = getCategoryIcon(item.name); return (
+                                <span style={{ fontSize:15, width:24, height:24, borderRadius:6, background:cat.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{cat.icon}</span>
+                              ); })()}
                               <div style={S.itemName}>{item.name}</div>
                               {editingId===item.id ? (
                                 <div style={S.amountEdit}>
