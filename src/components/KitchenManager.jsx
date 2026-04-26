@@ -23,7 +23,9 @@ const DEFAULT_SETTINGS = {
   familySize:      2,
   mealComposition: "full",   // "main" | "main_side" | "full"
   cookingTime:     0,        // 0=制限なし, 20, 30, 45
+  fontSize:        "sm",     // "sm" | "md" | "lg"
 };
+const FONT_SCALE = { sm: 1, md: 1.15, lg: 1.3 };
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
 const FISH_KEYWORDS  = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
 
@@ -364,6 +366,18 @@ export default function KitchenManager({ user }) {
             </div>
           </div>
 
+          {/* フォントサイズ */}
+          <div style={S.optRow}>
+            <span style={S.optLabel}>🔤 文字サイズ</span>
+            <div style={{ display:"flex", gap:5 }}>
+              {[["sm","小"],["md","中"],["lg","大"]].map(([v,label])=>(
+                <button key={v}
+                  style={{...S.optChip,...(settings.fontSize===v?S.optChipActive:{})}}
+                  onClick={()=>updSetting("fontSize", v)}>{label}</button>
+              ))}
+            </div>
+          </div>
+
           {/* 魚トラッキング */}
           <div style={{ ...S.optRow, borderBottom:"none", paddingBottom:0 }}>
             <span style={S.optLabel}>🐟 今週の魚メニュー</span>
@@ -393,7 +407,7 @@ export default function KitchenManager({ user }) {
 
   // ── レンダー ─────────────────────────────────────────
   return (
-    <div style={S.app}>
+    <div style={{...S.app, zoom: FONT_SCALE[settings.fontSize]}}>
       <style>{css}</style>
 
       {/* HEADER */}
