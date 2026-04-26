@@ -19,7 +19,13 @@ const DEFAULT_PRESETS = {
     retort:     ["焼くだけ餃子","温めるだけ肉団子","冷凍唐揚げ","冷凍シュウマイ","冷凍春巻き","冷凍ピラフ","冷凍チャーハン"],
   },
 };
+const DEFAULT_SETTINGS = {
+  familySize:      2,
+  mealComposition: "full",   // "main" | "main_side" | "full"
+  cookingTime:     0,        // 0=制限なし, 20, 30, 45
+};
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
+const FISH_KEYWORDS  = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
 
 function parseRecipes(text) {
   const blocks = text.split(/(?=\d+[.．]\s*【)/m).filter(Boolean);
@@ -49,6 +55,7 @@ export default function KitchenManager({ user }) {
   const [ingredients, setIngredients] = useState({ fridge:[], freezer:[] });
   const [presets,     setPresets]     = useState(DEFAULT_PRESETS);
   const [history,     setHistory]     = useState([]);
+  const [settings,    setSettings]    = useState(DEFAULT_SETTINGS);
   const [dataLoading, setDataLoading] = useState(true);
 
   const [activeLoc,   setActiveLoc]   = useState("fridge");
@@ -57,8 +64,9 @@ export default function KitchenManager({ user }) {
   const [inputAmount, setInputAmount] = useState("たっぷり");
   const [editingId,   setEditingId]   = useState(null);
 
-  const [editPresets, setEditPresets] = useState(false);
-  const [presetInput, setPresetInput] = useState("");
+  const [editPresets,  setEditPresets]  = useState(false);
+  const [presetInput,  setPresetInput]  = useState("");
+  const [showOptions,  setShowOptions]  = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [recipes, setRecipes] = useState(null);
@@ -72,32 +80,39 @@ export default function KitchenManager({ user }) {
 
   const loadData = async () => {
     setDataLoading(true);
+    const [iRes, pRes, hRes, sRes] = await Promise.all([
+      supabase.from("ingredients").select("*").order("created_at"),
+      supabase.from("presets").select("*"),
+      supabase.from("history").select("*").order("created_at", { ascending:false }).limit(30),
+      supabase.from("settings").select("data").eq("user_id", user.id).single(),
+    ]);
 
     // 食材
-    const { data: iRows } = await supabase
-      .from("ingredients").select("*").order("created_at");
-    if (iRows) {
+    if (iRes.data) {
       const ingr = { fridge:[], freezer:[] };
-      iRows.forEach(r => ingr[r.location].push({ id:r.id, name:r.name, amount:r.amount, kind:r.kind, addedAt:r.added_at }));
+      iRes.data.forEach(r => ingr[r.location].push({ id:r.id, name:r.name, amount:r.amount, kind:r.kind, addedAt:r.added_at }));
       setIngredients(ingr);
     }
 
     // プリセット
-    const { data: pRows } = await supabase.from("presets").select("*");
-    if (pRows && pRows.length > 0) {
+    if (pRes.data && pRes.data.length > 0) {
       const p = { fridge:{ ingredient:[], retort:[] }, freezer:{ ingredient:[], retort:[] } };
-      pRows.forEach(r => p[r.location][r.kind].push(r.name));
+      pRes.data.forEach(r => p[r.location][r.kind].push(r.name));
       setPresets(p);
     } else {
       await initDefaultPresets();
     }
 
     // 履歴
-    const { data: hRows } = await supabase
-      .from("history").select("*").order("created_at", { ascending:false }).limit(30);
-    if (hRows) {
-      setHistory(hRows.map(r => ({ id:r.id, date:r.date, recipes:r.recipes, ingredients:r.ingredients, ratings:r.ratings||{}, memo:r.memo||"" })));
+    if (hRes.data) {
+      setHistory(hRes.data.map(r => ({
+        id:r.id, date:r.date, recipes:r.recipes, ingredients:r.ingredients,
+        ratings:r.ratings||{}, memo:r.memo||"", createdAt:r.created_at,
+      })));
     }
+
+    // 設定
+    if (sRes.data?.data) setSettings({ ...DEFAULT_SETTINGS, ...sRes.data.data });
 
     setDataLoading(false);
   };
@@ -111,6 +126,20 @@ export default function KitchenManager({ user }) {
     await supabase.from("presets").insert(rows);
     setPresets(DEFAULT_PRESETS);
   }, [user.id]);
+
+  // ── 設定保存 ────────────────────────────────────────
+  const saveSettings = async (next) => {
+    setSettings(next);
+    await supabase.from("settings").upsert({ user_id:user.id, data:next });
+  };
+  const updSetting = (key, val) => saveSettings({ ...settings, [key]:val });
+
+  // ── 魚トラッキング ──────────────────────────────────
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const fishThisWeek = history.filter(h =>
+    h.createdAt && new Date(h.createdAt) > oneWeekAgo &&
+    h.recipes.some(r => FISH_KEYWORDS.some(k => r.title.includes(k)))
+  ).length;
 
   // ── 食材操作 ────────────────────────────────────────
   const addIngredient = async () => {
@@ -127,8 +156,7 @@ export default function KitchenManager({ user }) {
     if (ingredients[loc].some(i => i.name === name)) return;
     const id = crypto.randomUUID();
     const addedAt = new Date().toLocaleDateString("ja-JP");
-    const item = { id, name, amount:"たっぷり", kind, addedAt };
-    setIngredients(prev => ({ ...prev, [loc]:[...prev[loc], item] }));
+    setIngredients(prev => ({ ...prev, [loc]:[...prev[loc], { id, name, amount:"たっぷり", kind, addedAt }] }));
     await supabase.from("ingredients").insert({ id, user_id:user.id, name, amount:"たっぷり", kind, location:loc, added_at:addedAt });
   };
 
@@ -175,33 +203,44 @@ export default function KitchenManager({ user }) {
       retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
     ].filter(Boolean).join("\n");
 
+    // 設定に基づくプロンプト構築
+    const mealDesc = { main:"主菜1品のみ", main_side:"主菜1品と副菜1品", full:"主菜1品・副菜1〜2品・汁物1品のフルセット" }[settings.mealComposition];
+    const timeRule  = settings.cookingTime > 0 ? `・調理時間は${settings.cookingTime}分以内で作れる献立にしてください。` : "";
+    const fishRule  = fishThisWeek === 0
+      ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
+      : fishThisWeek < 2
+      ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。"
+      : "";
+
     const systemPrompt = `あなたは家庭料理の献立プランナーです。今日の夕食として実際に作れる献立を3つ提案してください。
 食材には「要調理の食材」と「レトルト・調理済み品（焼くだけ・温めるだけ）」の2種類があります。
+以下の条件を守ってください：
+・献立の構成は「${mealDesc}」でお願いします。
+・${settings.familySize}人家族向けの分量で提案してください。${timeRule}${fishRule}
+
 各献立は以下の形式で：
 【料理名】
 使用食材: （使うものを列挙。レトルト品は「○○（焼くだけ）」と明記）
+材料の目安: （${settings.familySize}人分の分量）
 調理時間: 約○分
 難易度: ★☆☆〜★★★
-作り方: 簡潔に3〜4ステップ
-レトルト品はそのまま主菜として活用し、副菜・汁物も含めた献立として提案してください。`;
+作り方: 簡潔に3〜4ステップ`;
 
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            contents: [{ role:"user", parts: [{ text: `今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
-            generationConfig: { maxOutputTokens: 1200 },
+            system_instruction: { parts:[{ text:systemPrompt }] },
+            contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
+            generationConfig:{ maxOutputTokens:1500 },
           }),
         }
       );
       const data = await res.json();
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (!text) throw new Error("empty response");
+      if (!text) throw new Error("empty");
       const parsed = parseRecipes(text);
       setRecipes(parsed);
 
@@ -209,9 +248,8 @@ export default function KitchenManager({ user }) {
         id: crypto.randomUUID(),
         date: new Date().toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }),
         recipes: parsed,
-        ingredients: { raw:rawItems, retort:retortItems },
-        ratings: {},
-        memo: "",
+        ingredients:{ raw:rawItems, retort:retortItems },
+        ratings:{}, memo:"", createdAt: new Date().toISOString(),
       };
       setHistory(prev => [entry, ...prev].slice(0, 30));
       await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"" });
@@ -225,7 +263,7 @@ export default function KitchenManager({ user }) {
   // ── 履歴操作 ────────────────────────────────────────
   const rateRecipe = async (histId, recipeIdx, stars) => {
     const entry = history.find(h => h.id === histId);
-    const newRatings = { ...entry.ratings, [recipeIdx]: stars };
+    const newRatings = { ...entry.ratings, [recipeIdx]:stars };
     const u = history.map(h => h.id!==histId ? h : { ...h, ratings:newRatings });
     setHistory(u);
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
@@ -240,8 +278,7 @@ export default function KitchenManager({ user }) {
   };
 
   const deleteHistory = async (histId) => {
-    const u = history.filter(h => h.id !== histId);
-    setHistory(u);
+    setHistory(prev => prev.filter(h => h.id !== histId));
     if (histDetail?.id === histId) setHistDetail(null);
     await supabase.from("history").delete().eq("id", histId);
   };
@@ -253,17 +290,87 @@ export default function KitchenManager({ user }) {
     fridge:  { ingredient:ingredients.fridge.filter(i=>i.kind==="ingredient").length,  retort:ingredients.fridge.filter(i=>i.kind==="retort").length },
     freezer: { ingredient:ingredients.freezer.filter(i=>i.kind==="ingredient").length, retort:ingredients.freezer.filter(i=>i.kind==="retort").length },
   };
-  const total        = ingredients.fridge.length + ingredients.freezer.length;
-  const totalRaw     = counts.fridge.ingredient + counts.freezer.ingredient;
-  const totalRetort  = counts.fridge.retort     + counts.freezer.retort;
+  const total       = ingredients.fridge.length + ingredients.freezer.length;
+  const totalRaw    = counts.fridge.ingredient + counts.freezer.ingredient;
+  const totalRetort = counts.fridge.retort     + counts.freezer.retort;
 
-  // ── 初期ローディング ────────────────────────────────
   if (dataLoading) return (
     <div style={S.app}>
       <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
         <div style={S.spinner} className="spin"/>
         <div style={{ color:"#718096", fontSize:14, marginTop:12 }}>データを読み込み中…</div>
       </div>
+    </div>
+  );
+
+  // ── 提案オプションUI ────────────────────────────────
+  const OptionsPanel = () => (
+    <div style={S.optCard}>
+      <button style={S.optToggle} onClick={()=>setShowOptions(v=>!v)}>
+        <span>⚙️ 提案オプション</span>
+        <span style={{ fontSize:11, color:"#A0AEC0" }}>{showOptions ? "▲ 閉じる" : "▼ 開く"}</span>
+      </button>
+
+      {showOptions && (
+        <div style={S.optBody}>
+          {/* 家族の人数 */}
+          <div style={S.optRow}>
+            <span style={S.optLabel}>👨‍👩‍👦 家族の人数</span>
+            <div style={S.optControls}>
+              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.max(1, settings.familySize-1))}>−</button>
+              <span style={S.stepVal}>{settings.familySize}人</span>
+              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.min(8, settings.familySize+1))}>＋</button>
+            </div>
+          </div>
+
+          {/* 献立の構成 */}
+          <div style={S.optRow}>
+            <span style={S.optLabel}>🍽️ 献立の構成</span>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {[["main","主菜のみ"],["main_side","主菜+副菜"],["full","フルセット"]].map(([v,label])=>(
+                <button key={v}
+                  style={{...S.optChip,...(settings.mealComposition===v?S.optChipActive:{})}}
+                  onClick={()=>updSetting("mealComposition", v)}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 調理時間 */}
+          <div style={S.optRow}>
+            <span style={S.optLabel}>⏱️ 調理時間</span>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+              {[[0,"制限なし"],[20,"20分"],[30,"30分"],[45,"45分"]].map(([v,label])=>(
+                <button key={v}
+                  style={{...S.optChip,...(settings.cookingTime===v?S.optChipActive:{})}}
+                  onClick={()=>updSetting("cookingTime", v)}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 魚トラッキング */}
+          <div style={{ ...S.optRow, borderBottom:"none", paddingBottom:0 }}>
+            <span style={S.optLabel}>🐟 今週の魚メニュー</span>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <span style={{ fontSize:18, fontWeight:800, color: fishThisWeek===0?"#E53E3E": fishThisWeek<2?"#D69E2E":"#2F855A" }}>
+                {fishThisWeek}回
+              </span>
+              <span style={{ fontSize:11, color:"#A0AEC0" }}>
+                {fishThisWeek===0?"→ 魚を優先提案します": fishThisWeek<2?"→ 魚を含めるよう提案":"→ 十分食べています"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 閉じているときの概要表示 */}
+      {!showOptions && (
+        <div style={S.optSummary}>
+          <span>👨‍👩‍👦 {settings.familySize}人</span>
+          <span>🍽️ {{ main:"主菜のみ", main_side:"主菜+副菜", full:"フルセット" }[settings.mealComposition]}</span>
+          {settings.cookingTime > 0 && <span>⏱️ {settings.cookingTime}分以内</span>}
+          <span style={{ color: fishThisWeek===0?"#E53E3E":fishThisWeek<2?"#D69E2E":"#2F855A" }}>🐟 今週{fishThisWeek}回</span>
+        </div>
+      )}
     </div>
   );
 
@@ -276,7 +383,7 @@ export default function KitchenManager({ user }) {
       <header style={S.header}>
         <div style={S.hi}>
           <div style={S.logo}>
-            <span style={{ fontSize:24 }}>🍱</span>
+            <img src="/favicon.png" alt="" style={{ width:28, height:28, borderRadius:7 }}/>
             <div>
               <div style={S.logoTitle}>おうちキッチン</div>
               <div style={S.logoSub}>食材管理 &amp; 献立提案</div>
@@ -436,6 +543,9 @@ export default function KitchenManager({ user }) {
               </div>
             ))}
 
+            {/* 提案オプション */}
+            <OptionsPanel />
+
             {error && <div style={S.errorMsg}>{error}</div>}
             <button style={{...S.suggestBtn,...(loading?S.suggestBtnLoading:{})}}
               onClick={getSuggestions} disabled={loading} className="suggest-btn">
@@ -531,11 +641,15 @@ export default function KitchenManager({ user }) {
                 ) : history.map(h=>{
                   const avgRating = Object.values(h.ratings).length
                     ? (Object.values(h.ratings).reduce((a,b)=>a+b,0)/Object.values(h.ratings).length).toFixed(1) : null;
+                  const hasFishRecipe = h.recipes.some(r => FISH_KEYWORDS.some(k => r.title.includes(k)));
                   return (
                     <div key={h.id} style={S.histCard} className="hist-card" onClick={()=>setHistDetail(h)}>
                       <div style={S.histCardTop}>
                         <div style={S.histDate}>📅 {h.date}</div>
-                        {avgRating && <div style={S.histRatingSummary}><span style={{ color:"#F6AD55" }}>★</span> {avgRating}</div>}
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          {hasFishRecipe && <span style={S.fishBadge}>🐟</span>}
+                          {avgRating && <div style={S.histRatingSummary}><span style={{ color:"#F6AD55" }}>★</span> {avgRating}</div>}
+                        </div>
                       </div>
                       <div style={S.histRecipeNames}>
                         {h.recipes.map((r,i)=>(
@@ -629,6 +743,19 @@ const S = {
   deleteBtn:{padding:"2px 5px",border:"none",background:"transparent",color:"#CBD5E0",cursor:"pointer",fontSize:11},
   empty:{textAlign:"center",color:"#A0AEC0",fontSize:13,padding:"12px 0"},
 
+  // 提案オプション
+  optCard:{background:"white",borderRadius:14,padding:14,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
+  optToggle:{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:"#2D3748",padding:0},
+  optBody:{marginTop:12,display:"flex",flexDirection:"column",gap:12},
+  optRow:{display:"flex",alignItems:"center",justifyContent:"space-between",paddingBottom:12,borderBottom:"1px solid #F7FAFC",flexWrap:"wrap",gap:8},
+  optLabel:{fontSize:12,fontWeight:600,color:"#4A5568",minWidth:120},
+  optControls:{display:"flex",alignItems:"center",gap:8},
+  stepBtn:{width:28,height:28,borderRadius:8,border:"1.5px solid #E2E8F0",background:"white",fontSize:16,cursor:"pointer",color:"#4A5568",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1},
+  stepVal:{fontSize:14,fontWeight:700,color:"#2D3748",minWidth:36,textAlign:"center"},
+  optChip:{padding:"5px 11px",borderRadius:20,border:"1.5px solid #E2E8F0",background:"white",fontSize:11,cursor:"pointer",color:"#718096",transition:"all .15s"},
+  optChipActive:{background:"#2D3748",color:"white",borderColor:"#2D3748",fontWeight:700},
+  optSummary:{display:"flex",flexWrap:"wrap",gap:10,marginTop:10,paddingTop:10,borderTop:"1px solid #F7FAFC"},
+
   errorMsg:{color:"#E53E3E",fontSize:13,textAlign:"center",marginBottom:8},
   suggestBtn:{width:"100%",padding:"14px",borderRadius:14,background:"linear-gradient(135deg,#667eea 0%,#764ba2 100%)",color:"white",border:"none",fontSize:15,fontWeight:700,cursor:"pointer",marginTop:4,boxShadow:"0 4px 18px rgba(102,126,234,0.4)",letterSpacing:0.3},
   suggestBtnLoading:{opacity:0.7,cursor:"not-allowed"},
@@ -656,6 +783,7 @@ const S = {
   histCardTop:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7},
   histDate:{fontSize:12,color:"#718096",fontWeight:600},
   histRatingSummary:{fontSize:13,fontWeight:700,color:"#2D3748"},
+  fishBadge:{fontSize:13,background:"#EBF8FF",borderRadius:8,padding:"1px 6px"},
   histRecipeNames:{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6},
   histRecipeName:{fontSize:12,background:"#EDF2F7",color:"#4A5568",borderRadius:8,padding:"3px 8px"},
   histRecipeNameTop:{background:"#FFFFF0",color:"#B7791F",border:"1px solid #FAF089"},

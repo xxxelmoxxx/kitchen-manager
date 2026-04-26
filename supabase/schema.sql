@@ -42,3 +42,11 @@ alter table history     enable row level security;
 create policy "own ingredients" on ingredients for all using (auth.uid() = user_id);
 create policy "own presets"     on presets     for all using (auth.uid() = user_id);
 create policy "own history"     on history     for all using (auth.uid() = user_id);
+
+-- Settings（ユーザー設定）
+create table if not exists settings (
+  user_id uuid references auth.users(id) on delete cascade primary key,
+  data    jsonb default '{}'
+);
+alter table settings enable row level security;
+create policy "own settings" on settings for all using (auth.uid() = user_id);
