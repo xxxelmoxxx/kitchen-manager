@@ -109,7 +109,7 @@ export default function KitchenManager({ user }) {
     // 食材
     if (iRes.data) {
       const ingr = { fridge:[], freezer:[] };
-      iRes.data.forEach(r => ingr[r.location].push({ id:r.id, name:r.name, amount:r.amount, kind:r.kind, addedAt:r.added_at }));
+      iRes.data.forEach(r => ingr[r.location].push({ id:r.id, name:r.name, amount:r.amount, kind:r.kind, addedAt:r.added_at, priority:r.priority||false }));
       setIngredients(ingr);
     }
 
@@ -190,6 +190,13 @@ export default function KitchenManager({ user }) {
     await supabase.from("ingredients").update({ amount }).eq("id", id);
   };
 
+  const togglePriority = async (loc, id) => {
+    const item = ingredients[loc].find(i => i.id === id);
+    const priority = !item.priority;
+    setIngredients(prev => ({ ...prev, [loc]:prev[loc].map(i => i.id===id ? {...i,priority} : i) }));
+    await supabase.from("ingredients").update({ priority }).eq("id", id);
+  };
+
   // ── プリセット操作 ──────────────────────────────────
   const addPreset = async () => {
     const name = presetInput.trim(); if (!name) return;
@@ -222,9 +229,16 @@ export default function KitchenManager({ user }) {
       retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
     ].filter(Boolean).join("\n");
 
+    // 優先食材
+    const priorityItems = [
+      ...ingredients.fridge.filter(i => i.priority).map(i => i.name),
+      ...ingredients.freezer.filter(i => i.priority).map(i => i.name),
+    ];
+
     // 設定に基づくプロンプト構築
     const mealDesc = { main:"主菜1品のみ", main_side:"主菜1品と副菜1品", full:"主菜1品・副菜1〜2品・汁物1品のフルセット" }[settings.mealComposition];
-    const timeRule  = settings.cookingTime > 0 ? `・調理時間は${settings.cookingTime}分以内で作れる献立にしてください。` : "";
+    const timeRule     = settings.cookingTime > 0 ? `・調理時間は${settings.cookingTime}分以内で作れる献立にしてください。` : "";
+    const priorityRule = priorityItems.length > 0 ? `・【必須】特に以下の食材を必ず使ってください：${priorityItems.join("、")}` : "";
     const fishRule  = fishThisWeek === 0
       ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
       : fishThisWeek < 2
@@ -235,7 +249,7 @@ export default function KitchenManager({ user }) {
 食材には「要調理の食材」と「レトルト・調理済み品（焼くだけ・温めるだけ）」の2種類があります。
 以下の条件を守ってください：
 ・献立の構成は「${mealDesc}」でお願いします。
-・${settings.familySize}人家族向けの分量で提案してください。${timeRule}${fishRule}
+・${settings.familySize}人家族向けの分量で提案してください。${priorityRule}${timeRule}${fishRule}
 
 各献立は以下の形式で：
 【料理名】
@@ -548,7 +562,7 @@ export default function KitchenManager({ user }) {
                         </div>
                         <div style={S.itemList}>
                           {items.map(item=>(
-                            <div key={item.id} style={S.item} className="item-row">
+                            <div key={item.id} style={{...S.item,...(item.priority?S.itemPriority:{})}} className="item-row">
                               {(() => { const cat = getCategoryIcon(item.name); return (
                                 <span style={{ fontSize:15, width:24, height:24, borderRadius:6, background:cat.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{cat.icon}</span>
                               ); })()}
@@ -566,6 +580,10 @@ export default function KitchenManager({ user }) {
                                   onClick={()=>setEditingId(item.id)}>{item.amount}</button>
                               )}
                               <div style={S.addedDate}>{item.addedAt}</div>
+                              <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}
+                                title={item.priority?"優先を解除":"優先食材に設定"}>
+                                {item.priority ? "⭐" : "☆"}
+                              </button>
                               <button style={S.deleteBtn} onClick={()=>removeIngredient(loc,item.id)}>✕</button>
                             </div>
                           ))}
@@ -768,12 +786,14 @@ const S = {
   kindSection:{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:7,border:"1px solid",display:"inline-block",marginBottom:5},
   itemList:{display:"flex",flexDirection:"column",gap:5},
   item:{display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:9,background:"#F7FAFC",border:"1px solid #EDF2F7"},
+  itemPriority:{background:"#FFFFF0",border:"1px solid #F6E05E"},
   itemName:{flex:1,fontSize:13,fontWeight:500,color:"#2D3748"},
   amountTag:{padding:"3px 9px",borderRadius:10,fontSize:11,border:"none",cursor:"pointer",fontWeight:600},
   amountEdit:{display:"flex",gap:4},
   amountChip:{padding:"3px 7px",borderRadius:7,border:"1px solid #E2E8F0",background:"white",fontSize:11,cursor:"pointer",color:"#4A5568"},
   amountChipActive:{background:"#2D3748",color:"white",borderColor:"#2D3748"},
   addedDate:{fontSize:10,color:"#A0AEC0"},
+  priorityBtn:{padding:"2px 4px",border:"none",background:"transparent",cursor:"pointer",fontSize:15,lineHeight:1},
   deleteBtn:{padding:"2px 5px",border:"none",background:"transparent",color:"#CBD5E0",cursor:"pointer",fontSize:11},
   empty:{textAlign:"center",color:"#A0AEC0",fontSize:13,padding:"12px 0"},
 
