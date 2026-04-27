@@ -96,6 +96,8 @@ export default function KitchenManager({ user }) {
   const [recipes, setRecipes] = useState(null);
   const [error,   setError]   = useState("");
   const [view,    setView]    = useState("pantry");
+  const [fallbackPrompt, setFallbackPrompt] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const [histDetail, setHistDetail] = useState(null);
 
@@ -262,7 +264,7 @@ export default function KitchenManager({ user }) {
       ...ingredients.freezer.filter(i=>i.kind==="retort").map(i=>`${i.name}(${i.amount})`),
     ];
     if (!rawItems.length && !retortItems.length) { setError("食材を登録してください！"); return; }
-    setError(""); setLoading(true); setView("results"); setRecipes(null);
+    setError(""); setFallbackPrompt(""); setLoading(true); setView("results"); setRecipes(null);
 
     const priorityItems = [
       ...ingredients.fridge.filter(i=>i.priority).map(i=>i.name),
@@ -287,6 +289,8 @@ export default function KitchenManager({ user }) {
       rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`   : "",
       retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
     ].filter(Boolean).join("\n");
+
+    const fullPrompt = `${systemPrompt}\n\n今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。`;
 
     try {
       const res = await fetch(
@@ -323,10 +327,8 @@ export default function KitchenManager({ user }) {
       if (dbRes.error) console.error("Supabase insert error:", dbRes.error);
     } catch(e) {
       console.error("getSuggestions failed:", e);
-      const isRateLimit = e.message?.includes("exhausted") || e.message?.includes("429");
-      setError(isRateLimit
-        ? "⏳ AIへのリクエストが混み合っています。1〜2分後にもう一度お試しください。"
-        : `提案の取得に失敗しました。もう一度お試しください。\n(${e.message})`);
+      setFallbackPrompt(fullPrompt);
+      setError("⏳ AIへのリクエストに失敗しました。下のプロンプトをコピーして、ChatGPTやClaude.aiに貼り付けると献立を取得できます。");
       setView("pantry");
     }
     setLoading(false);
@@ -666,6 +668,22 @@ export default function KitchenManager({ user }) {
 
             <OptionsPanel />
             {error && <div style={S.errorMsg}>{error}</div>}
+            {fallbackPrompt && (
+              <div style={S.fallbackCard}>
+                <div style={S.fallbackTitle}>📋 チャットAIへ貼り付け用プロンプト</div>
+                <div style={S.fallbackLinks}>
+                  <a href="https://claude.ai" target="_blank" rel="noreferrer" style={S.fallbackLink}>Claude.ai を開く →</a>
+                  <a href="https://chatgpt.com" target="_blank" rel="noreferrer" style={S.fallbackLink}>ChatGPT を開く →</a>
+                </div>
+                <pre style={S.fallbackPre}>{fallbackPrompt}</pre>
+                <button style={S.fallbackCopyBtn} onClick={()=>{
+                  navigator.clipboard.writeText(fallbackPrompt);
+                  setCopied(true); setTimeout(()=>setCopied(false), 2500);
+                }}>
+                  {copied ? "✅ コピーしました！" : "📋 プロンプトをコピー"}
+                </button>
+              </div>
+            )}
             <button style={{...S.suggestBtn,...(loading?S.suggestBtnLoading:{})}}
               onClick={getSuggestions} disabled={loading} className="suggest-btn">
               {loading?"🔄 献立を考え中...":"🍽️ 今日の夕食を提案してもらう"}
@@ -976,6 +994,13 @@ const S = {
   histRecipeNameMade:{background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4"},
   histMemoPreview:{fontSize:11,color:"#718096",marginBottom:5,fontStyle:"italic"},
   histIngredientSummary:{fontSize:11,color:"#A0AEC0"},
+
+  fallbackCard:{background:"#FFFBEB",border:"1.5px solid #F6E05E",borderRadius:14,padding:14,marginBottom:12},
+  fallbackTitle:{fontSize:13,fontWeight:700,color:"#B7791F",marginBottom:8},
+  fallbackLinks:{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"},
+  fallbackLink:{fontSize:12,color:"#667eea",fontWeight:600,textDecoration:"none"},
+  fallbackPre:{fontSize:11,color:"#4A5568",background:"white",borderRadius:8,padding:10,overflowX:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",border:"1px solid #E2E8F0",maxHeight:160,overflowY:"auto",margin:"0 0 10px"},
+  fallbackCopyBtn:{width:"100%",padding:"10px",borderRadius:9,background:"#2D3748",color:"white",border:"none",fontSize:13,fontWeight:600,cursor:"pointer"},
 
   madeSelectionCard:{background:"white",borderRadius:14,padding:16,marginTop:4,marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",border:"2px solid #9AE6B4"},
   madeSelectionTitle:{fontSize:15,fontWeight:800,color:"#2F855A",marginBottom:4},
