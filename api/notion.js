@@ -47,10 +47,10 @@ export default async function handler(req, res) {
       res.json({ success: true });
     }
 
-    // 取り込み後にチェックを外す
-    else if (action === "uncheck" && req.method === "POST") {
+    // 取り込み後にチェックをつける（在庫あり状態に戻す）
+    else if (action === "check" && req.method === "POST") {
       const { blockId } = req.body;
-      await notion.blocks.update({ block_id: blockId, to_do: { checked: false } });
+      await notion.blocks.update({ block_id: blockId, to_do: { checked: true } });
       res.json({ success: true });
     }
 

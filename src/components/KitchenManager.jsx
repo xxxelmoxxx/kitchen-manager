@@ -210,10 +210,10 @@ export default function KitchenManager({ user }) {
     try {
       const res  = await fetch("/api/notion?action=read");
       const data = await res.json();
-      const checked = (data.todos||[]).filter(t => t.checked && t.text.trim());
+      const checked = (data.todos||[]).filter(t => !t.checked && t.text.trim());
       setNotionItems(checked);
       setNotionSelected(new Set(checked.map(t => t.id)));
-      if (checked.length === 0) showNotionMsg("✅ チェック済みの食材がありません");
+      if (checked.length === 0) showNotionMsg("✅ 買う必要のある食材がありません");
     } catch { showNotionMsg("❌ Notionからの読み込みに失敗しました"); }
     setNotionLoading(false);
   };
@@ -228,8 +228,8 @@ export default function KitchenManager({ user }) {
       const addedAt  = new Date().toLocaleDateString("ja-JP");
       setIngredients(prev => ({ ...prev, [location]:[...prev[location],{id,name,amount:"たっぷり",kind,addedAt,priority:false}] }));
       await supabase.from("ingredients").insert({ id, user_id:user.id, name, amount:"たっぷり", kind, location, added_at:addedAt });
-      // Notionのチェックを外す
-      await fetch("/api/notion?action=uncheck", {
+      // Notionをチェック済みに戻す（在庫あり）
+      await fetch("/api/notion?action=check", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ blockId: item.id }),
       });
@@ -635,14 +635,14 @@ export default function KitchenManager({ user }) {
                 <span style={S.notionTitle}>📋 Notion 買い物リスト</span>
                 <button style={{...S.optChip,...(notionLoading?{opacity:0.5}:{})}}
                   onClick={fetchFromNotion} disabled={notionLoading}>
-                  {notionLoading?"読み込み中…":"📥 買ってきた食材を取り込む"}
+                  {notionLoading?"読み込み中…":"📥 買ってきたものを取り込む"}
                 </button>
               </div>
               {notionMsg && <div style={S.notionMsg}>{notionMsg}</div>}
               {notionItems.length > 0 && (
                 <div style={{ marginTop:10 }}>
                   <div style={{ fontSize:12, color:"#718096", marginBottom:8 }}>
-                    取り込む食材を選択してください（チェックを外したものはスキップ）
+                    買ってきた食材を選択してください（取り込むとNotionでも☒になります）
                   </div>
                   {notionItems.map(item => (
                     <label key={item.id} style={S.notionItem}>
