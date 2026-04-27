@@ -27,7 +27,9 @@ const DEFAULT_SETTINGS = {
 };
 const FONT_SCALE   = { sm:1, md:1.15, lg:1.3 };
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
-const FISH_KEYWORDS  = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
+const FISH_KEYWORDS   = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
+const RETORT_KEYWORDS = ["焼くだけ","温めるだけ","レトルト","缶詰","パウチ","インスタント","冷凍食品"];
+const FROZEN_KEYWORDS = ["冷凍","アイス"];
 const CATEGORY_MAP = [
   { icon:"🥩", color:"#FC8181", bg:"#FFF5F5", keys:["鶏","豚","牛","ひき肉","ベーコン","ソーセージ","ハム","ラム","合い挽き","唐揚げ","焼き鳥","肉団子","ミートボール","餃子","シュウマイ","春巻き"] },
   { icon:"🐟", color:"#4299E1", bg:"#EBF8FF", keys:["魚","サバ","鮭","サーモン","えび","エビ","タコ","イカ","アサリ","ツナ","マグロ","アジ","ブリ","タラ","イワシ","サンマ","ししゃも","魚介","シーフード","西京","塩サバ"] },
@@ -83,6 +85,12 @@ export default function KitchenManager({ user }) {
   const [editPresets, setEditPresets] = useState(false);
   const [presetInput, setPresetInput] = useState("");
   const [showOptions, setShowOptions] = useState(false);
+
+  // Notion連携
+  const [notionLoading,  setNotionLoading]  = useState(false);
+  const [notionMsg,      setNotionMsg]      = useState("");
+  const [notionItems,    setNotionItems]    = useState([]);
+  const [notionSelected, setNotionSelected] = useState(new Set());
 
   const [loading, setLoading] = useState(false);
   const [recipes, setRecipes] = useState(null);
@@ -179,6 +187,55 @@ export default function KitchenManager({ user }) {
     const priority = !item.priority;
     setIngredients(prev => ({ ...prev, [loc]:prev[loc].map(i => i.id===id ? {...i,priority} : i) }));
     await supabase.from("ingredients").update({ priority }).eq("id", id);
+  };
+
+  // ── Notion連携 ──────────────────────────────────────
+  const showNotionMsg = (msg) => { setNotionMsg(msg); setTimeout(()=>setNotionMsg(""), 3000); };
+
+  const addToNotion = async (name) => {
+    setNotionLoading(true);
+    try {
+      const res = await fetch("/api/notion?action=write", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error();
+      showNotionMsg(`🛒「${name}」を買い物リストに追加しました`);
+    } catch { showNotionMsg("❌ Notion連携に失敗しました"); }
+    setNotionLoading(false);
+  };
+
+  const fetchFromNotion = async () => {
+    setNotionLoading(true);
+    try {
+      const res  = await fetch("/api/notion?action=read");
+      const data = await res.json();
+      const checked = (data.todos||[]).filter(t => t.checked && t.text.trim());
+      setNotionItems(checked);
+      setNotionSelected(new Set(checked.map(t => t.id)));
+      if (checked.length === 0) showNotionMsg("✅ チェック済みの食材がありません");
+    } catch { showNotionMsg("❌ Notionからの読み込みに失敗しました"); }
+    setNotionLoading(false);
+  };
+
+  const importFromNotion = async () => {
+    const toImport = notionItems.filter(t => notionSelected.has(t.id));
+    for (const item of toImport) {
+      const name     = item.text.trim(); if (!name) continue;
+      const kind     = RETORT_KEYWORDS.some(k=>name.includes(k)) ? "retort" : "ingredient";
+      const location = FROZEN_KEYWORDS.some(k=>name.includes(k)) ? "freezer" : "fridge";
+      const id       = crypto.randomUUID();
+      const addedAt  = new Date().toLocaleDateString("ja-JP");
+      setIngredients(prev => ({ ...prev, [location]:[...prev[location],{id,name,amount:"たっぷり",kind,addedAt,priority:false}] }));
+      await supabase.from("ingredients").insert({ id, user_id:user.id, name, amount:"たっぷり", kind, location, added_at:addedAt });
+      // Notionのチェックを外す
+      await fetch("/api/notion?action=uncheck", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ blockId: item.id }),
+      });
+    }
+    setNotionItems([]); setNotionSelected(new Set());
+    showNotionMsg(`📥 ${toImport.length}品をアプリに取り込みました`);
   };
 
   // ── プリセット操作 ──────────────────────────────────
@@ -547,6 +604,7 @@ export default function KitchenManager({ user }) {
                               <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}>
                                 {item.priority?"⭐":"☆"}
                               </button>
+                              <button style={S.notionBtn} onClick={()=>addToNotion(item.name)} title="買い物リストに追加">🛒</button>
                               <button style={S.deleteBtn} onClick={()=>removeIngredient(loc,item.id)}>✕</button>
                             </div>
                           ))}
@@ -557,6 +615,46 @@ export default function KitchenManager({ user }) {
                 )}
               </div>
             ))}
+
+            {/* Notion連携パネル */}
+            <div style={S.notionCard}>
+              <div style={S.notionHeader}>
+                <span style={S.notionTitle}>📋 Notion 買い物リスト</span>
+                <button style={{...S.optChip,...(notionLoading?{opacity:0.5}:{})}}
+                  onClick={fetchFromNotion} disabled={notionLoading}>
+                  {notionLoading?"読み込み中…":"📥 買ってきた食材を取り込む"}
+                </button>
+              </div>
+              {notionMsg && <div style={S.notionMsg}>{notionMsg}</div>}
+              {notionItems.length > 0 && (
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:12, color:"#718096", marginBottom:8 }}>
+                    取り込む食材を選択してください（チェックを外したものはスキップ）
+                  </div>
+                  {notionItems.map(item => (
+                    <label key={item.id} style={S.notionItem}>
+                      <input type="checkbox"
+                        checked={notionSelected.has(item.id)}
+                        onChange={e => {
+                          const s = new Set(notionSelected);
+                          e.target.checked ? s.add(item.id) : s.delete(item.id);
+                          setNotionSelected(s);
+                        }}/>
+                      <span style={{ fontSize:13 }}>{item.text}</span>
+                      <span style={{ fontSize:11, color:"#A0AEC0", marginLeft:"auto" }}>
+                        {FROZEN_KEYWORDS.some(k=>item.text.includes(k))?"❄️ 冷凍":"🧊 冷蔵"}
+                        {" / "}
+                        {RETORT_KEYWORDS.some(k=>item.text.includes(k))?"📦 レトルト":"🥩 食材"}
+                      </span>
+                    </label>
+                  ))}
+                  <button style={{...S.suggestBtn, marginTop:8, fontSize:13, padding:"10px"}}
+                    onClick={importFromNotion}>
+                    ✅ 選択した{notionSelected.size}品を取り込む
+                  </button>
+                </div>
+              )}
+            </div>
 
             <OptionsPanel />
             {error && <div style={S.errorMsg}>{error}</div>}
@@ -801,7 +899,13 @@ const S = {
   amountChipActive:{background:"#2D3748",color:"white",borderColor:"#2D3748"},
   addedDate:{fontSize:10,color:"#A0AEC0"},
   priorityBtn:{padding:"2px 4px",border:"none",background:"transparent",cursor:"pointer",fontSize:15,lineHeight:1},
+  notionBtn:{padding:"2px 4px",border:"none",background:"transparent",cursor:"pointer",fontSize:13,lineHeight:1},
   deleteBtn:{padding:"2px 5px",border:"none",background:"transparent",color:"#CBD5E0",cursor:"pointer",fontSize:11},
+  notionCard:{background:"white",borderRadius:14,padding:14,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
+  notionHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8},
+  notionTitle:{fontSize:13,fontWeight:700,color:"#2D3748"},
+  notionMsg:{fontSize:12,color:"#2F855A",background:"#F0FFF4",border:"1px solid #9AE6B4",borderRadius:8,padding:"6px 10px",marginTop:8},
+  notionItem:{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderRadius:9,background:"#F7FAFC",border:"1px solid #EDF2F7",marginBottom:5,cursor:"pointer"},
   empty:{textAlign:"center",color:"#A0AEC0",fontSize:13,padding:"12px 0"},
 
   optCard:{background:"white",borderRadius:14,padding:14,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
