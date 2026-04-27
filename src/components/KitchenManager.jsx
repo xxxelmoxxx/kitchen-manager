@@ -274,19 +274,14 @@ export default function KitchenManager({ user }) {
     const fishRule     = fishThisWeek === 0 ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
                        : fishThisWeek < 2  ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。" : "";
 
-    const systemPrompt = `あなたは家庭料理の献立プランナーです。今日の夕食として実際に作れる献立を3つ提案してください。
-食材には「要調理の食材」と「レトルト・調理済み品（焼くだけ・温めるだけ）」の2種類があります。
-以下の条件を守ってください：
-・献立の構成は「${mealDesc}」でお願いします。
-・${settings.familySize}人家族向けの分量で提案してください。${priorityRule}${timeRule}${fishRule}
-
-各献立は以下の形式で：
+    const systemPrompt = `家庭料理の献立プランナー。夕食の献立を3つ提案。
+条件：構成は「${mealDesc}」、${settings.familySize}人分。${priorityRule}${timeRule}${fishRule}
+各献立の形式：
 【料理名】
-使用食材: （使うものを列挙。レトルト品は「○○（焼くだけ）」と明記）
-材料の目安: （${settings.familySize}人分の分量）
-調理時間: 約○分
-難易度: ★☆☆〜★★★
-作り方: 簡潔に3〜4ステップ`;
+使用食材:（レトルトは「○○（焼くだけ）」と明記）
+材料の目安:（${settings.familySize}人分）
+調理時間: 約○分 / 難易度: ★
+作り方: 3〜4ステップで簡潔に`;
 
     const userMsg = [
       rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`   : "",
@@ -300,7 +295,7 @@ export default function KitchenManager({ user }) {
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
             contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
-            generationConfig:{ maxOutputTokens:1200 },
+            generationConfig:{ maxOutputTokens:900 },
           }),
         }
       );
