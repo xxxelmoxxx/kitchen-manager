@@ -21,14 +21,13 @@ const DEFAULT_PRESETS = {
 };
 const DEFAULT_SETTINGS = {
   familySize:      2,
-  mealComposition: "full",   // "main" | "main_side" | "full"
-  cookingTime:     0,        // 0=制限なし, 20, 30, 45
-  fontSize:        "sm",     // "sm" | "md" | "lg"
+  mealComposition: "full",
+  cookingTime:     0,
+  fontSize:        "sm",
 };
-const FONT_SCALE = { sm: 1, md: 1.15, lg: 1.3 };
+const FONT_SCALE   = { sm:1, md:1.15, lg:1.3 };
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
 const FISH_KEYWORDS  = ["魚","サバ","鮭","サーモン","鯖","アジ","ブリ","タラ","ヒラメ","マグロ","ツナ","イワシ","サンマ","ししゃも","焼き魚","刺身","煮魚","塩サバ","西京","魚介"];
-
 const CATEGORY_MAP = [
   { icon:"🥩", color:"#FC8181", bg:"#FFF5F5", keys:["鶏","豚","牛","ひき肉","ベーコン","ソーセージ","ハム","ラム","合い挽き","唐揚げ","焼き鳥","肉団子","ミートボール","餃子","シュウマイ","春巻き"] },
   { icon:"🐟", color:"#4299E1", bg:"#EBF8FF", keys:["魚","サバ","鮭","サーモン","えび","エビ","タコ","イカ","アサリ","ツナ","マグロ","アジ","ブリ","タラ","イワシ","サンマ","ししゃも","魚介","シーフード","西京","塩サバ"] },
@@ -38,20 +37,17 @@ const CATEGORY_MAP = [
   { icon:"🍄", color:"#A0AEC0", bg:"#F7FAFC", keys:["しいたけ","えのき","まいたけ","なめこ","きのこ","エリンギ","しめじ"] },
   { icon:"🍚", color:"#F6AD55", bg:"#FFFAF0", keys:["米","うどん","そば","パスタ","麺","パン","餅","ごはん","チャーハン","ピラフ"] },
 ];
-
 function getCategoryIcon(name) {
-  for (const cat of CATEGORY_MAP) {
-    if (cat.keys.some(k => name.includes(k))) return cat;
-  }
+  for (const cat of CATEGORY_MAP) if (cat.keys.some(k => name.includes(k))) return cat;
   return { icon:"🫙", color:"#A0AEC0", bg:"#F7FAFC" };
 }
 
 function parseRecipes(text) {
   const blocks = text.split(/(?=\d+[.．]\s*【)/m).filter(Boolean);
-  if (blocks.length < 2) return [{ title: "今日の献立提案", content: text }];
-  return blocks.map((block) => {
+  if (blocks.length < 2) return [{ title:"今日の献立提案", content:text }];
+  return blocks.map(block => {
     const m = block.match(/【(.+?)】/);
-    return { title: m ? m[1] : block.split("\n")[0].replace(/^\d+[.．]\s*/,"").trim(), content: block };
+    return { title: m ? m[1] : block.split("\n")[0].replace(/^\d+[.．]\s*/,"").trim(), content:block };
   });
 }
 
@@ -70,6 +66,7 @@ function Stars({ value, onChange }) {
   );
 }
 
+// view: "pantry" | "results" | "madeRecipes" | "history"
 export default function KitchenManager({ user }) {
   const [ingredients, setIngredients] = useState({ fridge:[], freezer:[] });
   const [presets,     setPresets]     = useState(DEFAULT_PRESETS);
@@ -83,9 +80,9 @@ export default function KitchenManager({ user }) {
   const [inputAmount, setInputAmount] = useState("たっぷり");
   const [editingId,   setEditingId]   = useState(null);
 
-  const [editPresets,  setEditPresets]  = useState(false);
-  const [presetInput,  setPresetInput]  = useState("");
-  const [showOptions,  setShowOptions]  = useState(false);
+  const [editPresets, setEditPresets] = useState(false);
+  const [presetInput, setPresetInput] = useState("");
+  const [showOptions, setShowOptions] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [recipes, setRecipes] = useState(null);
@@ -105,15 +102,11 @@ export default function KitchenManager({ user }) {
       supabase.from("history").select("*").order("created_at", { ascending:false }).limit(30),
       supabase.from("settings").select("data").eq("user_id", user.id).single(),
     ]);
-
-    // 食材
     if (iRes.data) {
       const ingr = { fridge:[], freezer:[] };
       iRes.data.forEach(r => ingr[r.location].push({ id:r.id, name:r.name, amount:r.amount, kind:r.kind, addedAt:r.added_at, priority:r.priority||false }));
       setIngredients(ingr);
     }
-
-    // プリセット
     if (pRes.data && pRes.data.length > 0) {
       const p = { fridge:{ ingredient:[], retort:[] }, freezer:{ ingredient:[], retort:[] } };
       pRes.data.forEach(r => p[r.location][r.kind].push(r.name));
@@ -121,18 +114,14 @@ export default function KitchenManager({ user }) {
     } else {
       await initDefaultPresets();
     }
-
-    // 履歴
     if (hRes.data) {
       setHistory(hRes.data.map(r => ({
         id:r.id, date:r.date, recipes:r.recipes, ingredients:r.ingredients,
         ratings:r.ratings||{}, memo:r.memo||"", createdAt:r.created_at,
+        madeIndices:r.made_indices||[],
       })));
     }
-
-    // 設定
     if (sRes.data?.data) setSettings({ ...DEFAULT_SETTINGS, ...sRes.data.data });
-
     setDataLoading(false);
   };
 
@@ -146,7 +135,7 @@ export default function KitchenManager({ user }) {
     setPresets(DEFAULT_PRESETS);
   }, [user.id]);
 
-  // ── 設定保存 ────────────────────────────────────────
+  // ── 設定 ────────────────────────────────────────────
   const saveSettings = async (next) => {
     setSettings(next);
     await supabase.from("settings").upsert({ user_id:user.id, data:next });
@@ -165,31 +154,26 @@ export default function KitchenManager({ user }) {
     const name = inputName.trim(); if (!name) return;
     const id = crypto.randomUUID();
     const addedAt = new Date().toLocaleDateString("ja-JP");
-    const item = { id, name, amount:inputAmount, kind:activeKind, addedAt };
-    setIngredients(prev => ({ ...prev, [activeLoc]:[...prev[activeLoc], item] }));
+    setIngredients(prev => ({ ...prev, [activeLoc]:[...prev[activeLoc], { id, name, amount:inputAmount, kind:activeKind, addedAt, priority:false }] }));
     setInputName("");
     await supabase.from("ingredients").insert({ id, user_id:user.id, name, amount:inputAmount, kind:activeKind, location:activeLoc, added_at:addedAt });
   };
-
   const addFromPreset = async (loc, kind, name) => {
     if (ingredients[loc].some(i => i.name === name)) return;
     const id = crypto.randomUUID();
     const addedAt = new Date().toLocaleDateString("ja-JP");
-    setIngredients(prev => ({ ...prev, [loc]:[...prev[loc], { id, name, amount:"たっぷり", kind, addedAt }] }));
+    setIngredients(prev => ({ ...prev, [loc]:[...prev[loc], { id, name, amount:"たっぷり", kind, addedAt, priority:false }] }));
     await supabase.from("ingredients").insert({ id, user_id:user.id, name, amount:"たっぷり", kind, location:loc, added_at:addedAt });
   };
-
   const removeIngredient = async (loc, id) => {
     setIngredients(prev => ({ ...prev, [loc]:prev[loc].filter(i => i.id !== id) }));
     await supabase.from("ingredients").delete().eq("id", id);
   };
-
   const updateAmount = async (loc, id, amount) => {
     setIngredients(prev => ({ ...prev, [loc]:prev[loc].map(i => i.id===id ? {...i,amount} : i) }));
     setEditingId(null);
     await supabase.from("ingredients").update({ amount }).eq("id", id);
   };
-
   const togglePriority = async (loc, id) => {
     const item = ingredients[loc].find(i => i.id === id);
     const priority = !item.priority;
@@ -205,7 +189,6 @@ export default function KitchenManager({ user }) {
     setPresetInput("");
     await supabase.from("presets").insert({ user_id:user.id, location:activeLoc, kind:activeKind, name });
   };
-
   const removePreset = async (name) => {
     setPresets(prev => ({ ...prev, [activeLoc]:{ ...prev[activeLoc], [activeKind]:prev[activeLoc][activeKind].filter(p => p!==name) } }));
     await supabase.from("presets").delete().eq("user_id", user.id).eq("location", activeLoc).eq("kind", activeKind).eq("name", name);
@@ -222,28 +205,17 @@ export default function KitchenManager({ user }) {
       ...ingredients.freezer.filter(i=>i.kind==="retort").map(i=>`${i.name}(${i.amount})`),
     ];
     if (!rawItems.length && !retortItems.length) { setError("食材を登録してください！"); return; }
-    setError(""); setLoading(true); setView("recipes"); setRecipes(null);
+    setError(""); setLoading(true); setView("results"); setRecipes(null);
 
-    const userMsg = [
-      rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`    : "",
-      retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
-    ].filter(Boolean).join("\n");
-
-    // 優先食材
     const priorityItems = [
-      ...ingredients.fridge.filter(i => i.priority).map(i => i.name),
-      ...ingredients.freezer.filter(i => i.priority).map(i => i.name),
+      ...ingredients.fridge.filter(i=>i.priority).map(i=>i.name),
+      ...ingredients.freezer.filter(i=>i.priority).map(i=>i.name),
     ];
-
-    // 設定に基づくプロンプト構築
-    const mealDesc = { main:"主菜1品のみ", main_side:"主菜1品と副菜1品", full:"主菜1品・副菜1〜2品・汁物1品のフルセット" }[settings.mealComposition];
-    const timeRule     = settings.cookingTime > 0 ? `・調理時間は${settings.cookingTime}分以内で作れる献立にしてください。` : "";
+    const mealDesc     = { main:"主菜1品のみ", main_side:"主菜1品と副菜1品", full:"主菜1品・副菜1〜2品・汁物1品のフルセット" }[settings.mealComposition];
     const priorityRule = priorityItems.length > 0 ? `・【必須】特に以下の食材を必ず使ってください：${priorityItems.join("、")}` : "";
-    const fishRule  = fishThisWeek === 0
-      ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
-      : fishThisWeek < 2
-      ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。"
-      : "";
+    const timeRule     = settings.cookingTime > 0 ? `・調理時間は${settings.cookingTime}分以内で作れる献立にしてください。` : "";
+    const fishRule     = fishThisWeek === 0 ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
+                       : fishThisWeek < 2  ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。" : "";
 
     const systemPrompt = `あなたは家庭料理の献立プランナーです。今日の夕食として実際に作れる献立を3つ提案してください。
 食材には「要調理の食材」と「レトルト・調理済み品（焼くだけ・温めるだけ）」の2種類があります。
@@ -259,33 +231,35 @@ export default function KitchenManager({ user }) {
 難易度: ★☆☆〜★★★
 作り方: 簡潔に3〜4ステップ`;
 
+    const userMsg = [
+      rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`   : "",
+      retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
+    ].filter(Boolean).join("\n");
+
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
-        {
-          method:"POST", headers:{ "Content-Type":"application/json" },
+        { method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
-            system_instruction: { parts:[{ text:systemPrompt }] },
+            system_instruction:{ parts:[{ text:systemPrompt }] },
             contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
             generationConfig:{ maxOutputTokens:1500 },
           }),
         }
       );
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const data  = await res.json();
+      const text  = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
       if (!text) throw new Error("empty");
       const parsed = parseRecipes(text);
       setRecipes(parsed);
-
       const entry = {
-        id: crypto.randomUUID(),
+        id:crypto.randomUUID(),
         date: new Date().toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }),
-        recipes: parsed,
-        ingredients:{ raw:rawItems, retort:retortItems },
-        ratings:{}, memo:"", createdAt: new Date().toISOString(),
+        recipes:parsed, ingredients:{ raw:rawItems, retort:retortItems },
+        ratings:{}, memo:"", createdAt:new Date().toISOString(), madeIndices:[],
       };
       setHistory(prev => [entry, ...prev].slice(0, 30));
-      await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"" });
+      await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[] });
     } catch {
       setError("提案の取得に失敗しました。もう一度お試しください。");
       setView("pantry");
@@ -302,18 +276,27 @@ export default function KitchenManager({ user }) {
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
     await supabase.from("history").update({ ratings:newRatings }).eq("id", histId);
   };
-
   const updateMemo = async (histId, memo) => {
     const u = history.map(h => h.id!==histId ? h : { ...h, memo });
     setHistory(u);
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
     await supabase.from("history").update({ memo }).eq("id", histId);
   };
-
   const deleteHistory = async (histId) => {
     setHistory(prev => prev.filter(h => h.id !== histId));
     if (histDetail?.id === histId) setHistDetail(null);
     await supabase.from("history").delete().eq("id", histId);
+  };
+  const toggleMade = async (histId, recipeIdx) => {
+    const entry = history.find(h => h.id === histId);
+    const current = entry.madeIndices || [];
+    const madeIndices = current.includes(recipeIdx)
+      ? current.filter(i => i !== recipeIdx)
+      : [...current, recipeIdx];
+    const u = history.map(h => h.id!==histId ? h : { ...h, madeIndices });
+    setHistory(u);
+    if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
+    await supabase.from("history").update({ made_indices:madeIndices }).eq("id", histId);
   };
 
   const handleLogout = () => supabase.auth.signOut();
@@ -326,6 +309,17 @@ export default function KitchenManager({ user }) {
   const total       = ingredients.fridge.length + ingredients.freezer.length;
   const totalRaw    = counts.fridge.ingredient + counts.freezer.ingredient;
   const totalRetort = counts.fridge.retort     + counts.freezer.retort;
+
+  // 作った献立（全履歴からmadeIndicesがあるものを抽出）
+  const madeRecipes = history.flatMap(h =>
+    (h.madeIndices || []).map(idx => ({
+      histId:   h.id,
+      date:     h.date,
+      recipe:   h.recipes[idx],
+      rating:   h.ratings[idx] || 0,
+      memo:     h.memo,
+    }))
+  );
 
   if (dataLoading) return (
     <div style={S.app}>
@@ -341,79 +335,57 @@ export default function KitchenManager({ user }) {
     <div style={S.optCard}>
       <button style={S.optToggle} onClick={()=>setShowOptions(v=>!v)}>
         <span>⚙️ 提案オプション</span>
-        <span style={{ fontSize:11, color:"#A0AEC0" }}>{showOptions ? "▲ 閉じる" : "▼ 開く"}</span>
+        <span style={{ fontSize:11, color:"#A0AEC0" }}>{showOptions?"▲ 閉じる":"▼ 開く"}</span>
       </button>
-
       {showOptions && (
         <div style={S.optBody}>
-          {/* 家族の人数 */}
           <div style={S.optRow}>
             <span style={S.optLabel}>👨‍👩‍👦 家族の人数</span>
             <div style={S.optControls}>
-              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.max(1, settings.familySize-1))}>−</button>
+              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.max(1,settings.familySize-1))}>−</button>
               <span style={S.stepVal}>{settings.familySize}人</span>
-              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.min(8, settings.familySize+1))}>＋</button>
+              <button style={S.stepBtn} onClick={()=>updSetting("familySize", Math.min(8,settings.familySize+1))}>＋</button>
             </div>
           </div>
-
-          {/* 献立の構成 */}
           <div style={S.optRow}>
             <span style={S.optLabel}>🍽️ 献立の構成</span>
             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
               {[["main","主菜のみ"],["main_side","主菜+副菜"],["full","フルセット"]].map(([v,label])=>(
-                <button key={v}
-                  style={{...S.optChip,...(settings.mealComposition===v?S.optChipActive:{})}}
-                  onClick={()=>updSetting("mealComposition", v)}>{label}</button>
+                <button key={v} style={{...S.optChip,...(settings.mealComposition===v?S.optChipActive:{})}} onClick={()=>updSetting("mealComposition",v)}>{label}</button>
               ))}
             </div>
           </div>
-
-          {/* 調理時間 */}
           <div style={S.optRow}>
             <span style={S.optLabel}>⏱️ 調理時間</span>
             <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
               {[[0,"制限なし"],[20,"20分"],[30,"30分"],[45,"45分"]].map(([v,label])=>(
-                <button key={v}
-                  style={{...S.optChip,...(settings.cookingTime===v?S.optChipActive:{})}}
-                  onClick={()=>updSetting("cookingTime", v)}>{label}</button>
+                <button key={v} style={{...S.optChip,...(settings.cookingTime===v?S.optChipActive:{})}} onClick={()=>updSetting("cookingTime",v)}>{label}</button>
               ))}
             </div>
           </div>
-
-          {/* フォントサイズ */}
           <div style={S.optRow}>
             <span style={S.optLabel}>🔤 文字サイズ</span>
             <div style={{ display:"flex", gap:5 }}>
               {[["sm","小"],["md","中"],["lg","大"]].map(([v,label])=>(
-                <button key={v}
-                  style={{...S.optChip,...(settings.fontSize===v?S.optChipActive:{})}}
-                  onClick={()=>updSetting("fontSize", v)}>{label}</button>
+                <button key={v} style={{...S.optChip,...(settings.fontSize===v?S.optChipActive:{})}} onClick={()=>updSetting("fontSize",v)}>{label}</button>
               ))}
             </div>
           </div>
-
-          {/* 魚トラッキング */}
           <div style={{ ...S.optRow, borderBottom:"none", paddingBottom:0 }}>
             <span style={S.optLabel}>🐟 今週の魚メニュー</span>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{ fontSize:18, fontWeight:800, color: fishThisWeek===0?"#E53E3E": fishThisWeek<2?"#D69E2E":"#2F855A" }}>
-                {fishThisWeek}回
-              </span>
-              <span style={{ fontSize:11, color:"#A0AEC0" }}>
-                {fishThisWeek===0?"→ 魚を優先提案します": fishThisWeek<2?"→ 魚を含めるよう提案":"→ 十分食べています"}
-              </span>
+              <span style={{ fontSize:18, fontWeight:800, color:fishThisWeek===0?"#E53E3E":fishThisWeek<2?"#D69E2E":"#2F855A" }}>{fishThisWeek}回</span>
+              <span style={{ fontSize:11, color:"#A0AEC0" }}>{fishThisWeek===0?"→ 魚を優先提案します":fishThisWeek<2?"→ 魚を含めるよう提案":"→ 十分食べています"}</span>
             </div>
           </div>
         </div>
       )}
-
-      {/* 閉じているときの概要表示 */}
       {!showOptions && (
         <div style={S.optSummary}>
           <span>👨‍👩‍👦 {settings.familySize}人</span>
           <span>🍽️ {{ main:"主菜のみ", main_side:"主菜+副菜", full:"フルセット" }[settings.mealComposition]}</span>
           {settings.cookingTime > 0 && <span>⏱️ {settings.cookingTime}分以内</span>}
-          <span style={{ color: fishThisWeek===0?"#E53E3E":fishThisWeek<2?"#D69E2E":"#2F855A" }}>🐟 今週{fishThisWeek}回</span>
+          <span style={{ color:fishThisWeek===0?"#E53E3E":fishThisWeek<2?"#D69E2E":"#2F855A" }}>🐟 今週{fishThisWeek}回</span>
         </div>
       )}
     </div>
@@ -421,7 +393,7 @@ export default function KitchenManager({ user }) {
 
   // ── レンダー ─────────────────────────────────────────
   return (
-    <div style={{...S.app, zoom: FONT_SCALE[settings.fontSize]}}>
+    <div style={{...S.app, zoom:FONT_SCALE[settings.fontSize]}}>
       <style>{css}</style>
 
       {/* HEADER */}
@@ -436,11 +408,11 @@ export default function KitchenManager({ user }) {
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <div style={S.navBtns}>
-              {[["pantry","📦 食材"],["recipes","🍽️ 献立"],["history","📋 履歴"]].map(([v,label])=>(
+              {[["pantry","📦 食材"],["madeRecipes","🍽️ 献立"],["history","📋 履歴"]].map(([v,label])=>(
                 <button key={v}
-                  style={{...S.navBtn,...(view===v?S.navActive:{}),...(v==="recipes"&&!recipes&&!loading?S.navDisabled:{})}}
-                  onClick={()=>{ if(v==="recipes"&&!recipes&&!loading) return; setView(v); setHistDetail(null); }}>
-                  {label}{v==="history"&&history.length>0?<span style={S.histBadge}>{history.length}</span>:null}
+                  style={{...S.navBtn,...((view===v||(v==="pantry"&&view==="results"))?S.navActive:{})}}
+                  onClick={()=>{ setView(v); setHistDetail(null); }}>
+                  {label}
                 </button>
               ))}
             </div>
@@ -454,7 +426,6 @@ export default function KitchenManager({ user }) {
         {/* ═══ PANTRY ═══════════════════════════════════════ */}
         {view==="pantry" && (
           <div className="fade-in">
-            {/* Stats */}
             <div style={S.statsBar}>
               {Object.entries(LOCATIONS).map(([loc,cat])=>(
                 <div key={loc} style={S.statBlock}>
@@ -468,7 +439,6 @@ export default function KitchenManager({ user }) {
               <div style={S.statTotalBlock}><div style={S.statTotalNum}>{total}</div><div style={S.statTotalLabel}>合計</div></div>
             </div>
 
-            {/* Add form */}
             <div style={S.card}>
               <div style={S.cardTitle}>食材を追加</div>
               <div style={S.tabRow}>
@@ -498,8 +468,6 @@ export default function KitchenManager({ user }) {
                 </select>
                 <button style={S.addBtn} onClick={addIngredient}>追加</button>
               </div>
-
-              {/* Presets */}
               <div style={S.presetHeader}>
                 <span style={S.presetLabel}>よく使う{KINDS[activeKind].label}</span>
                 <button style={{...S.editToggleBtn,...(editPresets?S.editToggleBtnOn:{})}}
@@ -507,7 +475,6 @@ export default function KitchenManager({ user }) {
                   {editPresets?"✅ 完了":"✏️ 編集"}
                 </button>
               </div>
-
               {editPresets ? (
                 <div style={S.presetEditBox}>
                   <div style={S.presetEditRow}>
@@ -534,9 +501,7 @@ export default function KitchenManager({ user }) {
                     .map(p=>(
                       <button key={p}
                         style={{...S.presetChip,borderColor:KINDS[activeKind].border,color:KINDS[activeKind].color}}
-                        onClick={()=>addFromPreset(activeLoc,activeKind,p)}>
-                        + {p}
-                      </button>
+                        onClick={()=>addFromPreset(activeLoc,activeKind,p)}>+ {p}</button>
                     ))}
                   {presets[activeLoc][activeKind].filter(p=>!ingredients[activeLoc].some(i=>i.name===p)).length===0 &&
                     <span style={S.presetEmpty}>登録済みか、項目がありません</span>}
@@ -544,7 +509,6 @@ export default function KitchenManager({ user }) {
               )}
             </div>
 
-            {/* Ingredient lists */}
             {Object.entries(LOCATIONS).map(([loc,cat])=>(
               <div key={loc} style={S.card}>
                 <div style={S.cardTitleRow}>
@@ -580,9 +544,8 @@ export default function KitchenManager({ user }) {
                                   onClick={()=>setEditingId(item.id)}>{item.amount}</button>
                               )}
                               <div style={S.addedDate}>{item.addedAt}</div>
-                              <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}
-                                title={item.priority?"優先を解除":"優先食材に設定"}>
-                                {item.priority ? "⭐" : "☆"}
+                              <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}>
+                                {item.priority?"⭐":"☆"}
                               </button>
                               <button style={S.deleteBtn} onClick={()=>removeIngredient(loc,item.id)}>✕</button>
                             </div>
@@ -595,9 +558,7 @@ export default function KitchenManager({ user }) {
               </div>
             ))}
 
-            {/* 提案オプション */}
             <OptionsPanel />
-
             {error && <div style={S.errorMsg}>{error}</div>}
             <button style={{...S.suggestBtn,...(loading?S.suggestBtnLoading:{})}}
               onClick={getSuggestions} disabled={loading} className="suggest-btn">
@@ -606,8 +567,8 @@ export default function KitchenManager({ user }) {
           </div>
         )}
 
-        {/* ═══ RECIPES ══════════════════════════════════════ */}
-        {view==="recipes" && (
+        {/* ═══ RESULTS（一時的な提案結果画面） ════════════ */}
+        {view==="results" && (
           <div className="fade-in">
             <button style={S.backBtn} onClick={()=>setView("pantry")}>← 食材管理に戻る</button>
             {loading ? (
@@ -622,24 +583,64 @@ export default function KitchenManager({ user }) {
                   <span style={S.recipesTitle}>🍽️ 今日の献立提案</span>
                   <button style={S.retryBtn} onClick={getSuggestions}>🔄 再提案</button>
                 </div>
-                {history.length>0 && (
-                  <div style={S.ratingPrompt}>⭐ 気に入ったレシピに評価をつけましょう</div>
-                )}
+                <div style={S.ratingPrompt}>⭐ 気に入ったレシピに評価・「作った！」チェックをつけましょう</div>
                 {recipes.map((r,i)=>(
                   <div key={i} style={{...S.recipeCard,animationDelay:`${i*0.12}s`}} className="recipe-card">
                     <div style={S.recipeNum}>{i+1}</div>
                     <div style={S.recipeTitle}>{r.title}</div>
                     <div style={S.recipeContent}>{r.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
                     {history.length>0 && (
-                      <div style={S.recipeRatingRow}>
-                        <span style={S.recipeRatingLabel}>評価：</span>
-                        <Stars value={history[0].ratings[i]||0} onChange={s=>rateRecipe(history[0].id,i,s)}/>
+                      <div style={S.recipeFooter}>
+                        <div style={S.recipeRatingRow}>
+                          <span style={S.recipeRatingLabel}>評価：</span>
+                          <Stars value={history[0].ratings[i]||0} onChange={s=>rateRecipe(history[0].id,i,s)}/>
+                        </div>
+                        <button
+                          style={{...S.madeBtn,...((history[0].madeIndices||[]).includes(i)?S.madeBtnOn:{})}}
+                          onClick={()=>toggleMade(history[0].id,i)}>
+                          {(history[0].madeIndices||[]).includes(i)?"✅ 作った！":"☐ 作った？"}
+                        </button>
                       </div>
                     )}
                   </div>
                 ))}
               </div>
             ) : null}
+          </div>
+        )}
+
+        {/* ═══ MADE RECIPES（作った献立） ═══════════════════ */}
+        {view==="madeRecipes" && (
+          <div className="fade-in">
+            <div style={S.recipesHeader}>
+              <span style={S.recipesTitle}>🍽️ 作った献立</span>
+              <span style={{ fontSize:12, color:"#A0AEC0" }}>{madeRecipes.length}品</span>
+            </div>
+            {madeRecipes.length===0 ? (
+              <div style={S.histEmpty}>
+                <div style={{ fontSize:40, marginBottom:12 }}>🍳</div>
+                <div style={{ fontSize:14, color:"#A0AEC0" }}>まだ「作った！」した献立がありません</div>
+                <div style={{ fontSize:12, color:"#CBD5E0", marginTop:4 }}>献立提案後、実際に作ったレシピに✅をつけるとここに蓄積されます</div>
+              </div>
+            ) : (
+              madeRecipes.map((item, idx) => (
+                <div key={idx} style={{...S.recipeCard, animationDelay:`${idx*0.08}s`}} className="recipe-card">
+                  <div style={S.recipeNum}>✅</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                    <div style={S.recipeTitle}>{item.recipe?.title}</div>
+                    <div style={{ fontSize:11, color:"#A0AEC0", flexShrink:0, marginLeft:8 }}>📅 {item.date}</div>
+                  </div>
+                  <div style={S.recipeContent}>{item.recipe?.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
+                  <div style={S.recipeFooter}>
+                    <div style={S.recipeRatingRow}>
+                      <span style={S.recipeRatingLabel}>評価：</span>
+                      <Stars value={item.rating} onChange={null}/>
+                    </div>
+                    {item.memo && <div style={{ fontSize:11, color:"#718096", fontStyle:"italic" }}>📝 {item.memo}</div>}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
 
@@ -655,19 +656,26 @@ export default function KitchenManager({ user }) {
                 </div>
                 <div style={{...S.card,marginBottom:12}}>
                   <div style={S.cardTitle}>使用した食材</div>
-                  <div style={{ fontSize:12,color:"#4A5568",lineHeight:2 }}>
+                  <div style={{ fontSize:12, color:"#4A5568", lineHeight:2 }}>
                     {histDetail.ingredients.raw.length>0    && <div>🥩 {histDetail.ingredients.raw.join("　")}</div>}
                     {histDetail.ingredients.retort.length>0 && <div>📦 {histDetail.ingredients.retort.join("　")}</div>}
                   </div>
                 </div>
                 {histDetail.recipes.map((r,i)=>(
-                  <div key={i} style={S.recipeCard} className="recipe-card">
-                    <div style={S.recipeNum}>{i+1}</div>
+                  <div key={i} style={{...S.recipeCard,...((histDetail.madeIndices||[]).includes(i)?S.recipeCardMade:{})}} className="recipe-card">
+                    <div style={S.recipeNum}>{(histDetail.madeIndices||[]).includes(i)?"✅":i+1}</div>
                     <div style={S.recipeTitle}>{r.title}</div>
                     <div style={S.recipeContent}>{r.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
-                    <div style={S.recipeRatingRow}>
-                      <span style={S.recipeRatingLabel}>評価：</span>
-                      <Stars value={histDetail.ratings[i]||0} onChange={s=>rateRecipe(histDetail.id,i,s)}/>
+                    <div style={S.recipeFooter}>
+                      <div style={S.recipeRatingRow}>
+                        <span style={S.recipeRatingLabel}>評価：</span>
+                        <Stars value={histDetail.ratings[i]||0} onChange={s=>rateRecipe(histDetail.id,i,s)}/>
+                      </div>
+                      <button
+                        style={{...S.madeBtn,...((histDetail.madeIndices||[]).includes(i)?S.madeBtnOn:{})}}
+                        onClick={()=>toggleMade(histDetail.id,i)}>
+                        {(histDetail.madeIndices||[]).includes(i)?"✅ 作った！":"☐ 作った？"}
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -682,31 +690,32 @@ export default function KitchenManager({ user }) {
               <div>
                 <div style={S.recipesHeader}>
                   <span style={S.recipesTitle}>📋 献立履歴</span>
-                  <span style={{ fontSize:12,color:"#A0AEC0" }}>{history.length}件</span>
+                  <span style={{ fontSize:12, color:"#A0AEC0" }}>{history.length}件</span>
                 </div>
                 {history.length===0 ? (
                   <div style={S.histEmpty}>
-                    <div style={{ fontSize:40,marginBottom:12 }}>📭</div>
-                    <div style={{ fontSize:14,color:"#A0AEC0" }}>まだ献立の履歴がありません</div>
-                    <div style={{ fontSize:12,color:"#CBD5E0",marginTop:4 }}>食材を登録して提案を求めると、ここに記録されます</div>
+                    <div style={{ fontSize:40, marginBottom:12 }}>📭</div>
+                    <div style={{ fontSize:14, color:"#A0AEC0" }}>まだ献立の履歴がありません</div>
                   </div>
                 ) : history.map(h=>{
                   const avgRating = Object.values(h.ratings).length
                     ? (Object.values(h.ratings).reduce((a,b)=>a+b,0)/Object.values(h.ratings).length).toFixed(1) : null;
-                  const hasFishRecipe = h.recipes.some(r => FISH_KEYWORDS.some(k => r.title.includes(k)));
+                  const hasFishRecipe = h.recipes.some(r=>FISH_KEYWORDS.some(k=>r.title.includes(k)));
+                  const madeCount = (h.madeIndices||[]).length;
                   return (
                     <div key={h.id} style={S.histCard} className="hist-card" onClick={()=>setHistDetail(h)}>
                       <div style={S.histCardTop}>
                         <div style={S.histDate}>📅 {h.date}</div>
                         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          {madeCount>0 && <span style={S.madeBadge}>✅ {madeCount}品作った</span>}
                           {hasFishRecipe && <span style={S.fishBadge}>🐟</span>}
                           {avgRating && <div style={S.histRatingSummary}><span style={{ color:"#F6AD55" }}>★</span> {avgRating}</div>}
                         </div>
                       </div>
                       <div style={S.histRecipeNames}>
                         {h.recipes.map((r,i)=>(
-                          <span key={i} style={{...S.histRecipeName,...(h.ratings[i]>=4?S.histRecipeNameTop:{})}}>
-                            {h.ratings[i]>=4?"⭐ ":""}{r.title}
+                          <span key={i} style={{...S.histRecipeName,...((h.madeIndices||[]).includes(i)?S.histRecipeNameMade:h.ratings[i]>=4?S.histRecipeNameTop:{})}}>
+                            {(h.madeIndices||[]).includes(i)?"✅ ":h.ratings[i]>=4?"⭐ ":""}{r.title}
                           </span>
                         ))}
                       </div>
@@ -737,8 +746,6 @@ const S = {
   navBtns:{display:"flex",gap:5},
   navBtn:{padding:"5px 12px",borderRadius:20,border:"1.5px solid #E2E8F0",background:"white",fontSize:12,cursor:"pointer",color:"#4A5568",transition:"all .2s",position:"relative"},
   navActive:{background:"#2D3748",color:"white",borderColor:"#2D3748"},
-  navDisabled:{opacity:0.4,cursor:"default"},
-  histBadge:{position:"absolute",top:-6,right:-6,background:"#E53E3E",color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700},
   logoutBtn:{padding:"5px 9px",borderRadius:20,border:"1.5px solid #E2E8F0",background:"white",fontSize:14,cursor:"pointer",color:"#A0AEC0",lineHeight:1},
   main:{maxWidth:680,margin:"0 auto",padding:"14px 14px 48px"},
 
@@ -797,7 +804,6 @@ const S = {
   deleteBtn:{padding:"2px 5px",border:"none",background:"transparent",color:"#CBD5E0",cursor:"pointer",fontSize:11},
   empty:{textAlign:"center",color:"#A0AEC0",fontSize:13,padding:"12px 0"},
 
-  // 提案オプション
   optCard:{background:"white",borderRadius:14,padding:14,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
   optToggle:{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:"#2D3748",padding:0},
   optBody:{marginTop:12,display:"flex",flexDirection:"column",gap:12},
@@ -826,28 +832,33 @@ const S = {
   ratingPrompt:{fontSize:12,color:"#B7791F",background:"#FFFFF0",border:"1px solid #FAF089",borderRadius:8,padding:"6px 12px",marginBottom:10,textAlign:"center"},
 
   recipeCard:{background:"white",borderRadius:14,padding:"16px 16px 12px 58px",marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",position:"relative"},
+  recipeCardMade:{borderLeft:"3px solid #68D391",background:"#F0FFF4"},
   recipeNum:{position:"absolute",left:12,top:14,width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#667eea,#764ba2)",color:"white",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800},
   recipeTitle:{fontSize:15,fontWeight:700,color:"#2D3748",marginBottom:7},
   recipeContent:{fontSize:12,color:"#4A5568",lineHeight:1.85,whiteSpace:"pre-wrap",marginBottom:10},
-  recipeRatingRow:{display:"flex",alignItems:"center",gap:6,paddingTop:8,borderTop:"1px solid #EDF2F7"},
+  recipeFooter:{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:"1px solid #EDF2F7",flexWrap:"wrap",gap:8},
+  recipeRatingRow:{display:"flex",alignItems:"center",gap:6},
   recipeRatingLabel:{fontSize:11,color:"#A0AEC0"},
+  madeBtn:{padding:"5px 12px",borderRadius:20,border:"1.5px solid #E2E8F0",background:"white",fontSize:12,cursor:"pointer",color:"#718096",fontWeight:600,transition:"all .15s"},
+  madeBtnOn:{background:"#F0FFF4",borderColor:"#68D391",color:"#2F855A"},
 
   histEmpty:{textAlign:"center",padding:"60px 20px",background:"white",borderRadius:14,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
   histCard:{background:"white",borderRadius:14,padding:14,marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",cursor:"pointer",border:"1.5px solid transparent",transition:"all .2s"},
   histCardTop:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7},
   histDate:{fontSize:12,color:"#718096",fontWeight:600},
   histRatingSummary:{fontSize:13,fontWeight:700,color:"#2D3748"},
+  madeBadge:{fontSize:11,background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4",borderRadius:8,padding:"1px 7px",fontWeight:600},
   fishBadge:{fontSize:13,background:"#EBF8FF",borderRadius:8,padding:"1px 6px"},
   histRecipeNames:{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6},
   histRecipeName:{fontSize:12,background:"#EDF2F7",color:"#4A5568",borderRadius:8,padding:"3px 8px"},
   histRecipeNameTop:{background:"#FFFFF0",color:"#B7791F",border:"1px solid #FAF089"},
+  histRecipeNameMade:{background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4"},
   histMemoPreview:{fontSize:11,color:"#718096",marginBottom:5,fontStyle:"italic"},
   histIngredientSummary:{fontSize:11,color:"#A0AEC0"},
 
   histDetailHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12},
   histDetailDate:{fontSize:14,fontWeight:700,color:"#2D3748"},
   histDeleteBtn:{padding:"5px 10px",borderRadius:8,border:"1.5px solid #FED7D7",background:"#FFF5F5",color:"#E53E3E",fontSize:12,cursor:"pointer"},
-
   memoInput:{width:"100%",padding:"8px 10px",borderRadius:8,border:"1.5px solid #E2E8F0",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit",boxSizing:"border-box"},
 };
 
