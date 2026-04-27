@@ -681,10 +681,10 @@ export default function KitchenManager({ user }) {
                   <span style={S.recipesTitle}>🍽️ 今日の献立提案</span>
                   <button style={S.retryBtn} onClick={getSuggestions}>🔄 再提案</button>
                 </div>
-                <div style={S.ratingPrompt}>⭐ 気に入ったレシピに評価・「作った！」チェックをつけましょう</div>
+                <div style={S.ratingPrompt}>⭐ 気に入ったレシピに評価をつけましょう</div>
                 {recipes.map((r,i)=>(
-                  <div key={i} style={{...S.recipeCard,animationDelay:`${i*0.12}s`}} className="recipe-card">
-                    <div style={S.recipeNum}>{i+1}</div>
+                  <div key={i} style={{...S.recipeCard,...((history[0]?.madeIndices||[]).includes(i)?S.recipeCardMade:{}),animationDelay:`${i*0.12}s`}} className="recipe-card">
+                    <div style={S.recipeNum}>{(history[0]?.madeIndices||[]).includes(i)?"✅":i+1}</div>
                     <div style={S.recipeTitle}>{r.title}</div>
                     <div style={S.recipeContent}>{r.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
                     {history.length>0 && (
@@ -693,15 +693,24 @@ export default function KitchenManager({ user }) {
                           <span style={S.recipeRatingLabel}>評価：</span>
                           <Stars value={history[0].ratings[i]||0} onChange={s=>rateRecipe(history[0].id,i,s)}/>
                         </div>
-                        <button
-                          style={{...S.madeBtn,...((history[0].madeIndices||[]).includes(i)?S.madeBtnOn:{})}}
-                          onClick={()=>toggleMade(history[0].id,i)}>
-                          {(history[0].madeIndices||[]).includes(i)?"✅ 作った！":"☐ 作った？"}
-                        </button>
                       </div>
                     )}
                   </div>
                 ))}
+                {history.length>0 && (
+                  <div style={S.madeSelectionCard}>
+                    <div style={S.madeSelectionTitle}>🍳 今日はどれを作りましたか？</div>
+                    <div style={S.madeSelectionSub}>実際に作ったレシピをタップして記録しましょう（複数選択可）</div>
+                    {recipes.map((r,i)=>(
+                      <button key={i}
+                        style={{...S.madeSelectBtn,...((history[0].madeIndices||[]).includes(i)?S.madeSelectBtnOn:{})}}
+                        onClick={()=>toggleMade(history[0].id,i)}>
+                        <span style={S.madeSelectCheck}>{(history[0].madeIndices||[]).includes(i)?"✅":"☐"}</span>
+                        <span style={S.madeSelectName}>{r.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -959,6 +968,14 @@ const S = {
   histRecipeNameMade:{background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4"},
   histMemoPreview:{fontSize:11,color:"#718096",marginBottom:5,fontStyle:"italic"},
   histIngredientSummary:{fontSize:11,color:"#A0AEC0"},
+
+  madeSelectionCard:{background:"white",borderRadius:14,padding:16,marginTop:4,marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",border:"2px solid #9AE6B4"},
+  madeSelectionTitle:{fontSize:15,fontWeight:800,color:"#2F855A",marginBottom:4},
+  madeSelectionSub:{fontSize:11,color:"#718096",marginBottom:12},
+  madeSelectBtn:{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:10,border:"1.5px solid #E2E8F0",background:"#F7FAFC",cursor:"pointer",marginBottom:7,textAlign:"left",transition:"all .15s"},
+  madeSelectBtnOn:{background:"#F0FFF4",borderColor:"#68D391"},
+  madeSelectCheck:{fontSize:18,flexShrink:0,width:22},
+  madeSelectName:{fontSize:13,fontWeight:600,color:"#2D3748"},
 
   histDetailHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12},
   histDetailDate:{fontSize:14,fontWeight:700,color:"#2D3748"},
