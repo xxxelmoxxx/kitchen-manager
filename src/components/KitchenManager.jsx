@@ -99,6 +99,10 @@ export default function KitchenManager({ user }) {
   const [fallbackPrompt, setFallbackPrompt] = useState("");
   const [copied, setCopied] = useState(false);
 
+  const [showManual, setShowManual] = useState(false);
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualContent, setManualContent] = useState("");
+
   const [histDetail, setHistDetail] = useState(null);
 
   // ── 初期データ読み込み ──────────────────────────────
@@ -364,6 +368,22 @@ export default function KitchenManager({ user }) {
     setHistory(u);
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
     await supabase.from("history").update({ made_indices:madeIndices }).eq("id", histId);
+  };
+
+  const saveManualRecipe = async () => {
+    const title = manualTitle.trim(); if (!title) return;
+    const entry = {
+      id: crypto.randomUUID(),
+      date: new Date().toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }),
+      recipes: [{ title, content: manualContent.trim() }],
+      ingredients: { raw:[], retort:[] },
+      ratings: {}, memo: "", createdAt: new Date().toISOString(),
+      madeIndices: [0],
+    };
+    setHistory(prev => [entry, ...prev].slice(0, 30));
+    await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[0] });
+    setManualTitle(""); setManualContent(""); setShowManual(false);
+    setView("madeRecipes");
   };
 
   const handleLogout = () => supabase.auth.signOut();
@@ -688,6 +708,35 @@ export default function KitchenManager({ user }) {
               onClick={getSuggestions} disabled={loading} className="suggest-btn">
               {loading?"🔄 献立を考え中...":"🍽️ 今日の夕食を提案してもらう"}
             </button>
+
+            <button style={S.manualToggleBtn} onClick={()=>{ setShowManual(v=>!v); setManualTitle(""); setManualContent(""); }}>
+              {showManual ? "▲ 閉じる" : "📝 献立を手入力して記録する"}
+            </button>
+            {showManual && (
+              <div style={S.manualCard}>
+                <div style={S.manualTitle}>📝 今日作った献立を記録</div>
+                <input
+                  style={{...S.input, width:"100%", boxSizing:"border-box", marginBottom:8}}
+                  value={manualTitle}
+                  onChange={e=>setManualTitle(e.target.value)}
+                  placeholder="料理名（例：肉じゃが、鶏の照り焼き…）"
+                  onKeyDown={e=>e.key==="Enter"&&manualContent===""&&saveManualRecipe()}
+                />
+                <textarea
+                  style={{...S.memoInput, marginBottom:10}}
+                  value={manualContent}
+                  onChange={e=>setManualContent(e.target.value)}
+                  placeholder="材料・作り方・メモなど（任意）"
+                  rows={4}
+                />
+                <button
+                  style={{...S.suggestBtn, background:"linear-gradient(135deg,#48BB78,#2F855A)", boxShadow:"0 4px 14px rgba(72,187,120,0.4)", opacity:manualTitle.trim()?1:0.5}}
+                  onClick={saveManualRecipe}
+                  disabled={!manualTitle.trim()}>
+                  ✅ 作った献立として記録する
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -994,6 +1043,10 @@ const S = {
   histRecipeNameMade:{background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4"},
   histMemoPreview:{fontSize:11,color:"#718096",marginBottom:5,fontStyle:"italic"},
   histIngredientSummary:{fontSize:11,color:"#A0AEC0"},
+
+  manualToggleBtn:{width:"100%",marginTop:10,padding:"11px",borderRadius:12,border:"1.5px dashed #CBD5E0",background:"white",fontSize:13,color:"#718096",cursor:"pointer",fontWeight:600},
+  manualCard:{background:"white",borderRadius:14,padding:16,marginTop:8,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",border:"1.5px solid #9AE6B4"},
+  manualTitle:{fontSize:14,fontWeight:700,color:"#2F855A",marginBottom:12},
 
   fallbackCard:{background:"#FFFBEB",border:"1.5px solid #F6E05E",borderRadius:14,padding:14,marginBottom:12},
   fallbackTitle:{fontSize:13,fontWeight:700,color:"#B7791F",marginBottom:8},
