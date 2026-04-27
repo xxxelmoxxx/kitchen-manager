@@ -305,8 +305,16 @@ export default function KitchenManager({ user }) {
         }
       );
       const data  = await res.json();
+      if (!res.ok) {
+        const msg = data.error?.message || `Gemini API error (${res.status})`;
+        console.error("Gemini API error:", data);
+        throw new Error(msg);
+      }
       const text  = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (!text) throw new Error("empty");
+      if (!text) {
+        console.error("Gemini empty response:", data);
+        throw new Error("empty response");
+      }
       const parsed = parseRecipes(text);
       setRecipes(parsed);
       const entry = {
@@ -316,9 +324,11 @@ export default function KitchenManager({ user }) {
         ratings:{}, memo:"", createdAt:new Date().toISOString(), madeIndices:[],
       };
       setHistory(prev => [entry, ...prev].slice(0, 30));
-      await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[] });
-    } catch {
-      setError("提案の取得に失敗しました。もう一度お試しください。");
+      const dbRes = await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[] });
+      if (dbRes.error) console.error("Supabase insert error:", dbRes.error);
+    } catch(e) {
+      console.error("getSuggestions failed:", e);
+      setError(`提案の取得に失敗しました。もう一度お試しください。\n(${e.message})`);
       setView("pantry");
     }
     setLoading(false);
