@@ -102,6 +102,7 @@ export default function KitchenManager({ user }) {
   const [showManual, setShowManual] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
   const [manualContent, setManualContent] = useState("");
+  const [manualDate, setManualDate] = useState(() => new Date().toLocaleDateString("sv-SE"));
 
   const [histDetail, setHistDetail] = useState(null);
 
@@ -372,9 +373,11 @@ export default function KitchenManager({ user }) {
 
   const saveManualRecipe = async () => {
     const title = manualTitle.trim(); if (!title) return;
+    const d = new Date(manualDate);
+    const dateLabel = `${d.getMonth()+1}/${d.getDate()}`;
     const entry = {
       id: crypto.randomUUID(),
-      date: new Date().toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }),
+      date: dateLabel,
       recipes: [{ title, content: manualContent.trim() }],
       ingredients: { raw:[], retort:[] },
       ratings: {}, memo: "", createdAt: new Date().toISOString(),
@@ -383,6 +386,7 @@ export default function KitchenManager({ user }) {
     setHistory(prev => [entry, ...prev].slice(0, 30));
     await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[0] });
     setManualTitle(""); setManualContent(""); setShowManual(false);
+    setManualDate(new Date().toLocaleDateString("sv-SE"));
     setView("madeRecipes");
   };
 
@@ -709,12 +713,19 @@ export default function KitchenManager({ user }) {
               {loading?"🔄 献立を考え中...":"🍽️ 今日の夕食を提案してもらう"}
             </button>
 
-            <button style={S.manualToggleBtn} onClick={()=>{ setShowManual(v=>!v); setManualTitle(""); setManualContent(""); }}>
+            <button style={S.manualToggleBtn} onClick={()=>{ setShowManual(v=>!v); setManualTitle(""); setManualContent(""); setManualDate(new Date().toLocaleDateString("sv-SE")); }}>
               {showManual ? "▲ 閉じる" : "📝 献立を手入力して記録する"}
             </button>
             {showManual && (
               <div style={S.manualCard}>
-                <div style={S.manualTitle}>📝 今日作った献立を記録</div>
+                <div style={S.manualTitle}>📝 献立を記録</div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                  <span style={{ fontSize:12, color:"#718096", flexShrink:0 }}>📅 日付</span>
+                  <input type="date" style={{...S.input, flex:1}}
+                    value={manualDate}
+                    max={new Date().toLocaleDateString("sv-SE")}
+                    onChange={e=>setManualDate(e.target.value)}/>
+                </div>
                 <input
                   style={{...S.input, width:"100%", boxSizing:"border-box", marginBottom:8}}
                   value={manualTitle}
