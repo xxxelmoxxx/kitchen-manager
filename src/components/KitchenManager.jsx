@@ -300,7 +300,7 @@ export default function KitchenManager({ user }) {
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
             contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
-            generationConfig:{ maxOutputTokens:1500 },
+            generationConfig:{ maxOutputTokens:1200 },
           }),
         }
       );
@@ -328,7 +328,10 @@ export default function KitchenManager({ user }) {
       if (dbRes.error) console.error("Supabase insert error:", dbRes.error);
     } catch(e) {
       console.error("getSuggestions failed:", e);
-      setError(`提案の取得に失敗しました。もう一度お試しください。\n(${e.message})`);
+      const isRateLimit = e.message?.includes("exhausted") || e.message?.includes("429");
+      setError(isRateLimit
+        ? "⏳ AIへのリクエストが混み合っています。1〜2分後にもう一度お試しください。"
+        : `提案の取得に失敗しました。もう一度お試しください。\n(${e.message})`);
       setView("pantry");
     }
     setLoading(false);
