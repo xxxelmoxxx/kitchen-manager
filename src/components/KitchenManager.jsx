@@ -109,6 +109,8 @@ export default function KitchenManager({ user }) {
   const [promptForCopy, setPromptForCopy] = useState("");
   const [showPromptPanel, setShowPromptPanel] = useState(false);
   const [selectedComponents, setSelectedComponents] = useState({ main:null, side:null, soup:null });
+  const [editingMadeId,  setEditingMadeId]  = useState(null);
+  const [editingMemo,    setEditingMemo]    = useState("");
 
   const [showManual, setShowManual] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
@@ -429,6 +431,19 @@ ${mealFormat}
     setHistory(u);
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
     await supabase.from("history").update({ made_components:components }).eq("id", histId);
+  };
+  const rateComponent = async (histId, compKey, rating) => {
+    const entry = history.find(h => h.id===histId);
+    const comps = { ...entry.madeComponents, [compKey]: { ...entry.madeComponents[compKey], rating } };
+    await saveMadeComponents(histId, comps);
+  };
+  const deleteMadeEntry = async (item) => {
+    if (!window.confirm("この作った記録を削除しますか？")) return;
+    if (item.type==="components") {
+      await saveMadeComponents(item.histId, null);
+    } else {
+      await toggleMade(item.histId, item.recipeIdx);
+    }
   };
 
   const saveManualRecipe = async () => {
@@ -981,36 +996,74 @@ ${mealFormat}
                 <div style={{ fontSize:12, color:"#CBD5E0", marginTop:4 }}>献立提案後、実際に作ったレシピに✅をつけるとここに蓄積されます</div>
               </div>
             ) : (
-              madeRecipes.map((item, idx) => (
-                <div key={idx} style={{...S.recipeCard, animationDelay:`${idx*0.08}s`}} className="recipe-card">
-                  <div style={S.recipeNum}>✅</div>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
-                    {item.type==="components"
-                      ? <div style={S.recipeTitle}>{item.madeComponents.main?.name || "手作り献立"}</div>
-                      : <div style={S.recipeTitle}>{item.recipe?.title}</div>
-                    }
-                    <div style={{ fontSize:11, color:"#A0AEC0", flexShrink:0, marginLeft:8 }}>📅 {item.date}</div>
-                  </div>
-                  {item.type==="components" ? (
-                    <div style={{ fontSize:12, color:"#4A5568", lineHeight:2 }}>
-                      {item.madeComponents.main && <div>🍖 <b>主菜</b>：{item.madeComponents.main.name}</div>}
-                      {item.madeComponents.side && <div>🥗 <b>副菜</b>：{item.madeComponents.side.name}</div>}
-                      {item.madeComponents.soup && <div>🍜 <b>汁物</b>：{item.madeComponents.soup.name}</div>}
+              madeRecipes.map((item, idx) => {
+                const isEditing = editingMadeId === `${item.histId}-${item.type==="recipe"?item.recipeIdx:"c"}`;
+                const editKey   = `${item.histId}-${item.type==="recipe"?item.recipeIdx:"c"}`;
+                return (
+                  <div key={idx} style={{...S.recipeCard, animationDelay:`${idx*0.08}s`}} className="recipe-card">
+                    <div style={S.recipeNum}>✅</div>
+                    {/* ヘッダー行 */}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                      <div>
+                        <div style={S.recipeTitle}>
+                          {item.type==="components" ? (item.madeComponents.main?.name || "手作り献立") : item.recipe?.title}
+                        </div>
+                        <div style={{ fontSize:11, color:"#A0AEC0" }}>📅 {item.date}</div>
+                      </div>
+                      <div style={{ display:"flex", gap:5, flexShrink:0, marginLeft:8 }}>
+                        <button style={S.madeEditBtn} onClick={()=>{ setEditingMadeId(isEditing?null:editKey); setEditingMemo(item.memo||""); }}>
+                          {isEditing?"✕":"✏️"}
+                        </button>
+                        <button style={S.madeDelBtn} onClick={()=>deleteMadeEntry(item)}>🗑️</button>
+                      </div>
                     </div>
-                  ) : (
-                    <div style={S.recipeContent}>{item.recipe?.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
-                  )}
-                  <div style={S.recipeFooter}>
-                    {item.type==="recipe" && (
-                      <div style={S.recipeRatingRow}>
-                        <span style={S.recipeRatingLabel}>評価：</span>
-                        <Stars value={item.rating} onChange={null}/>
+
+                    {/* コンポーネント表示 & 個別評価 */}
+                    {item.type==="components" ? (
+                      <div style={{ marginBottom:8 }}>
+                        {[["main","🍖","主菜"],["side","🥗","副菜"],["soup","🍜","汁物"]].map(([key,emoji,label])=>{
+                          const comp = item.madeComponents[key];
+                          if (!comp) return null;
+                          return (
+                            <div key={key} style={S.compRatingRow}>
+                              <span style={S.compRatingLabel}>{emoji} {label}：{comp.name}</span>
+                              <Stars value={comp.rating||0} onChange={s=>rateComponent(item.histId,key,s)}/>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={S.recipeContent}>{item.recipe?.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
+                        <div style={{...S.recipeRatingRow, marginBottom:8}}>
+                          <span style={S.recipeRatingLabel}>評価：</span>
+                          <Stars value={item.rating} onChange={s=>rateRecipe(item.histId, item.recipeIdx, s)}/>
+                        </div>
                       </div>
                     )}
-                    {item.memo && <div style={{ fontSize:11, color:"#718096", fontStyle:"italic" }}>📝 {item.memo}</div>}
+
+                    {/* メモ表示 / 編集 */}
+                    {isEditing ? (
+                      <div>
+                        <textarea style={{...S.memoInput, marginBottom:7}}
+                          value={editingMemo} onChange={e=>setEditingMemo(e.target.value)}
+                          placeholder="感想・次回メモなど…" rows={3}/>
+                        <div style={{ display:"flex", gap:7 }}>
+                          <button style={{...S.addBtn, flex:1, fontSize:12}}
+                            onClick={async ()=>{ await updateMemo(item.histId, editingMemo); setEditingMadeId(null); }}>
+                            💾 保存
+                          </button>
+                          <button style={{...S.optChip, fontSize:12}} onClick={()=>setEditingMadeId(null)}>キャンセル</button>
+                        </div>
+                      </div>
+                    ) : (
+                      item.memo
+                        ? <div style={{ fontSize:11, color:"#718096", fontStyle:"italic", marginTop:4 }}>📝 {item.memo}</div>
+                        : <button style={S.addMemoBtn} onClick={()=>{ setEditingMadeId(editKey); setEditingMemo(""); }}>+ メモを追加</button>
+                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}
@@ -1258,6 +1311,11 @@ const S = {
   compTypeLabel:{fontSize:12,fontWeight:700,color:"#4A5568",marginBottom:5,marginTop:2},
   savedCompsRow:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12,padding:"8px 10px",background:"#F0FFF4",borderRadius:9,alignItems:"center"},
   savedCompChip:{fontSize:11,background:"#C6F6D5",color:"#276749",borderRadius:8,padding:"2px 8px",fontWeight:600},
+  compRatingRow:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #F7FAFC",flexWrap:"wrap",gap:4},
+  compRatingLabel:{fontSize:12,color:"#4A5568",flex:1},
+  madeEditBtn:{padding:"3px 8px",borderRadius:8,border:"1.5px solid #E2E8F0",background:"white",fontSize:13,cursor:"pointer",color:"#718096"},
+  madeDelBtn:{padding:"3px 8px",borderRadius:8,border:"1.5px solid #FED7D7",background:"#FFF5F5",fontSize:13,cursor:"pointer",color:"#E53E3E"},
+  addMemoBtn:{marginTop:6,padding:"4px 10px",borderRadius:8,border:"1px dashed #CBD5E0",background:"transparent",fontSize:11,color:"#A0AEC0",cursor:"pointer"},
 
   histDetailHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12},
   histDetailDate:{fontSize:14,fontWeight:700,color:"#2D3748"},
