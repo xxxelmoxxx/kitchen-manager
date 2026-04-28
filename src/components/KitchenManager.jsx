@@ -104,6 +104,8 @@ export default function KitchenManager({ user }) {
   const [manualContent, setManualContent] = useState("");
   const [manualDate, setManualDate] = useState(() => new Date().toLocaleDateString("sv-SE"));
 
+  const [notionOverrides, setNotionOverrides] = useState({});
+
   const [histDetail, setHistDetail] = useState(null);
 
   // ── 初期データ読み込み ──────────────────────────────
@@ -220,17 +222,28 @@ export default function KitchenManager({ user }) {
       const checked = (data.todos||[]).filter(t => !t.checked && t.text.trim());
       setNotionItems(checked);
       setNotionSelected(new Set(checked.map(t => t.id)));
+      const ov = {};
+      checked.forEach(t => { ov[t.id] = {
+        location: FROZEN_KEYWORDS.some(k=>t.text.includes(k)) ? "freezer" : "fridge",
+        kind:     RETORT_KEYWORDS.some(k=>t.text.includes(k)) ? "retort"  : "ingredient",
+      }; });
+      setNotionOverrides(ov);
       if (checked.length === 0) showNotionMsg("✅ 買う必要のある食材がありません");
     } catch { showNotionMsg("❌ Notionからの読み込みに失敗しました"); }
     setNotionLoading(false);
+  };
+
+  const closeNotionImport = () => {
+    setNotionItems([]); setNotionSelected(new Set()); setNotionOverrides({});
   };
 
   const importFromNotion = async () => {
     const toImport = notionItems.filter(t => notionSelected.has(t.id));
     for (const item of toImport) {
       const name     = item.text.trim(); if (!name) continue;
-      const kind     = RETORT_KEYWORDS.some(k=>name.includes(k)) ? "retort" : "ingredient";
-      const location = FROZEN_KEYWORDS.some(k=>name.includes(k)) ? "freezer" : "fridge";
+      const ov       = notionOverrides[item.id] || {};
+      const kind     = ov.kind     || (RETORT_KEYWORDS.some(k=>name.includes(k)) ? "retort" : "ingredient");
+      const location = ov.location || (FROZEN_KEYWORDS.some(k=>name.includes(k)) ? "freezer" : "fridge");
       const id       = crypto.randomUUID();
       const addedAt  = new Date().toLocaleDateString("ja-JP");
       setIngredients(prev => ({ ...prev, [location]:[...prev[location],{id,name,amount:"たっぷり",kind,addedAt,priority:false}] }));
@@ -241,7 +254,7 @@ export default function KitchenManager({ user }) {
         body: JSON.stringify({ blockId: item.id }),
       });
     }
-    setNotionItems([]); setNotionSelected(new Set());
+    setNotionItems([]); setNotionSelected(new Set()); setNotionOverrides({});
     showNotionMsg(`📥 ${toImport.length}品をアプリに取り込みました`);
   };
 
@@ -269,6 +282,11 @@ export default function KitchenManager({ user }) {
       ...ingredients.freezer.filter(i=>i.kind==="retort").map(i=>`${i.name}(${i.amount})`),
     ];
     if (!rawItems.length && !retortItems.length) { setError("食材を登録してください！"); return; }
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      setError("⚠️ Gemini APIキーが設定されていません。VercelのEnvironment Variablesに VITE_GEMINI_API_KEY を追加してRedeployしてください。");
+      return;
+    }
     setError(""); setFallbackPrompt(""); setLoading(true); setView("results"); setRecipes(null);
 
     const priorityItems = [
@@ -299,7 +317,7 @@ export default function KitchenManager({ user }) {
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         { method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
@@ -333,7 +351,15 @@ export default function KitchenManager({ user }) {
     } catch(e) {
       console.error("getSuggestions failed:", e);
       setFallbackPrompt(fullPrompt);
-      setError("⏳ AIへのリクエストに失敗しました。下のプロンプトをコピーして、ChatGPTやClaude.aiに貼り付けると献立を取得できます。");
+      const msg = e.message || "";
+      const isQuota    = msg.includes("exhausted") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED");
+      const isKeyError = msg.includes("API_KEY") || msg.includes("invalid") || msg.includes("403");
+      const errText = isKeyError
+        ? "⚠️ APIキーが無効です。Vercelの VITE_GEMINI_API_KEY を確認し、Redeployしてください。"
+        : isQuota
+        ? "⏳ AIの無料枠が上限に達しています。しばらく待つか、下のプロンプトをコピーしてClaude.ai/ChatGPTに貼り付けてください。"
+        : `❌ 提案の取得に失敗しました（${msg}）。下のプロンプトをコピーしてClaude.ai/ChatGPTをお使いください。`;
+      setError(errText);
       setView("pantry");
     }
     setLoading(false);
@@ -550,6 +576,9 @@ export default function KitchenManager({ user }) {
                 ))}
               </div>
               <div style={S.inputRow}>
+                {inputName.trim() && (() => { const c = getCategoryIcon(inputName); return (
+                  <span style={{ fontSize:18, width:32, height:32, borderRadius:7, background:c.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }} title="自動判定アイコン">{c.icon}</span>
+                ); })()}
                 <input style={S.input} value={inputName}
                   onChange={e=>setInputName(e.target.value)}
                   onKeyDown={e=>e.key==="Enter"&&addIngredient()}
@@ -638,7 +667,10 @@ export default function KitchenManager({ user }) {
                               <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}>
                                 {item.priority?"⭐":"☆"}
                               </button>
-                              <button style={S.notionBtn} onClick={()=>addToNotion(item.name)} title="買い物リストに追加">🛒</button>
+                              <button style={{...S.notionBtn,...(notionLoading?{opacity:0.3,cursor:"not-allowed"}:{})}}
+                                onClick={()=>!notionLoading&&addToNotion(item.name)} title={notionLoading?"追加中…":"買い物リストに追加"}>
+                                {notionLoading?"⏳":"🛒"}
+                              </button>
                               <button style={S.deleteBtn} onClick={()=>removeIngredient(loc,item.id)}>✕</button>
                             </div>
                           ))}
@@ -654,38 +686,57 @@ export default function KitchenManager({ user }) {
             <div style={S.notionCard}>
               <div style={S.notionHeader}>
                 <span style={S.notionTitle}>📋 Notion 買い物リスト</span>
-                <button style={{...S.optChip,...(notionLoading?{opacity:0.5}:{})}}
-                  onClick={fetchFromNotion} disabled={notionLoading}>
-                  {notionLoading?"読み込み中…":"📥 買ってきたものを取り込む"}
-                </button>
+                {notionItems.length === 0 ? (
+                  <button style={{...S.optChip,...(notionLoading?{opacity:0.5}:{})}}
+                    onClick={fetchFromNotion} disabled={notionLoading}>
+                    {notionLoading?"読み込み中…":"📥 買ってきたものを取り込む"}
+                  </button>
+                ) : (
+                  <button style={{...S.optChip, color:"#718096"}} onClick={closeNotionImport}>✕ 閉じる</button>
+                )}
               </div>
               {notionMsg && <div style={S.notionMsg}>{notionMsg}</div>}
               {notionItems.length > 0 && (
                 <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:12, color:"#718096", marginBottom:8 }}>
-                    買ってきた食材を選択してください（取り込むとNotionでも☒になります）
+                  <div style={{ fontSize:11, color:"#718096", marginBottom:8 }}>
+                    買ってきた食材を選択・カテゴリを確認して取り込んでください（取り込むとNotionでも☒になります）
                   </div>
-                  {notionItems.map(item => (
-                    <label key={item.id} style={S.notionItem}>
-                      <input type="checkbox"
-                        checked={notionSelected.has(item.id)}
-                        onChange={e => {
-                          const s = new Set(notionSelected);
-                          e.target.checked ? s.add(item.id) : s.delete(item.id);
-                          setNotionSelected(s);
-                        }}/>
-                      <span style={{ fontSize:13 }}>{item.text}</span>
-                      <span style={{ fontSize:11, color:"#A0AEC0", marginLeft:"auto" }}>
-                        {FROZEN_KEYWORDS.some(k=>item.text.includes(k))?"❄️ 冷凍":"🧊 冷蔵"}
-                        {" / "}
-                        {RETORT_KEYWORDS.some(k=>item.text.includes(k))?"📦 レトルト":"🥩 食材"}
-                      </span>
-                    </label>
-                  ))}
-                  <button style={{...S.suggestBtn, marginTop:8, fontSize:13, padding:"10px"}}
-                    onClick={importFromNotion}>
-                    ✅ 選択した{notionSelected.size}品を取り込む
-                  </button>
+                  <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
+                    <button style={S.notionSelBtn} onClick={()=>setNotionSelected(new Set(notionItems.map(t=>t.id)))}>☑ 全選択</button>
+                    <button style={S.notionSelBtn} onClick={()=>setNotionSelected(new Set())}>☐ 全解除</button>
+                  </div>
+                  {notionItems.map(item => {
+                    const ov = notionOverrides[item.id] || {};
+                    const setOv = (key, val) => setNotionOverrides(prev=>({...prev,[item.id]:{...prev[item.id],[key]:val}}));
+                    return (
+                      <div key={item.id} style={S.notionItemRow}>
+                        <input type="checkbox"
+                          checked={notionSelected.has(item.id)}
+                          onChange={e => {
+                            const s = new Set(notionSelected);
+                            e.target.checked ? s.add(item.id) : s.delete(item.id);
+                            setNotionSelected(s);
+                          }}/>
+                        <span style={{ fontSize:13, flex:1 }}>{item.text}</span>
+                        <select style={S.notionSelBox} value={ov.location||"fridge"} onChange={e=>setOv("location",e.target.value)}>
+                          <option value="fridge">🧊 冷蔵</option>
+                          <option value="freezer">❄️ 冷凍</option>
+                        </select>
+                        <select style={S.notionSelBox} value={ov.kind||"ingredient"} onChange={e=>setOv("kind",e.target.value)}>
+                          <option value="ingredient">🥩 食材</option>
+                          <option value="retort">📦 レトルト</option>
+                        </select>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                    <button style={{...S.suggestBtn, flex:1, fontSize:13, padding:"10px"}}
+                      onClick={importFromNotion} disabled={notionSelected.size===0}>
+                      ✅ 選択した{notionSelected.size}品を取り込む
+                    </button>
+                    <button style={{...S.optChip, padding:"10px 14px", fontSize:13}}
+                      onClick={closeNotionImport}>取り込まない</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1054,6 +1105,10 @@ const S = {
   histRecipeNameMade:{background:"#F0FFF4",color:"#2F855A",border:"1px solid #9AE6B4"},
   histMemoPreview:{fontSize:11,color:"#718096",marginBottom:5,fontStyle:"italic"},
   histIngredientSummary:{fontSize:11,color:"#A0AEC0"},
+
+  notionSelBtn:{padding:"4px 10px",borderRadius:8,border:"1.5px solid #E2E8F0",background:"white",fontSize:11,cursor:"pointer",color:"#4A5568"},
+  notionItemRow:{display:"flex",alignItems:"center",gap:7,padding:"7px 8px",borderRadius:9,background:"#F7FAFC",border:"1px solid #EDF2F7",marginBottom:5},
+  notionSelBox:{fontSize:11,padding:"3px 4px",borderRadius:6,border:"1px solid #E2E8F0",background:"white",cursor:"pointer",flexShrink:0},
 
   manualToggleBtn:{width:"100%",marginTop:10,padding:"11px",borderRadius:12,border:"1.5px dashed #CBD5E0",background:"white",fontSize:13,color:"#718096",cursor:"pointer",fontWeight:600},
   manualCard:{background:"white",borderRadius:14,padding:16,marginTop:8,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",border:"1.5px solid #9AE6B4"},
