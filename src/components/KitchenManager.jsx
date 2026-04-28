@@ -45,8 +45,9 @@ function getCategoryIcon(name) {
 }
 
 function parseRecipes(text) {
-  const blocks = text.split(/(?=\d+[.．]\s*【)/m).filter(Boolean);
-  if (blocks.length < 2) return [{ title:"今日の献立提案", content:text }];
+  const blocks = text.split(/(?=\d+[.．]\s*【)/m)
+    .filter(b => b.trim() && /【.+?】/.test(b));
+  if (blocks.length < 1) return [{ title:"今日の献立提案", content:text }];
   return blocks.map(block => {
     const m = block.match(/【(.+?)】/);
     return { title: m ? m[1] : block.split("\n")[0].replace(/^\d+[.．]\s*/,"").trim(), content:block };
@@ -328,8 +329,8 @@ export default function KitchenManager({ user }) {
         { method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
-            contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。` }] }],
-            generationConfig:{ maxOutputTokens:2000 },
+            contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n前置きなし・説明なし・挨拶なし。「1．【」から即座に始めること。` }] }],
+            generationConfig:{ maxOutputTokens:3000 },
           }),
         }
       );
