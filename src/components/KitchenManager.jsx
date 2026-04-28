@@ -99,6 +99,8 @@ export default function KitchenManager({ user }) {
   const [view,    setView]    = useState("pantry");
   const [fallbackPrompt, setFallbackPrompt] = useState("");
   const [copied, setCopied] = useState(false);
+  const [promptForCopy, setPromptForCopy] = useState("");
+  const [showPromptPanel, setShowPromptPanel] = useState(false);
 
   const [showManual, setShowManual] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
@@ -300,28 +302,27 @@ export default function KitchenManager({ user }) {
     const fishRule     = fishThisWeek === 0 ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
                        : fishThisWeek < 2  ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。" : "";
 
-    const systemPrompt = `家庭料理の献立プランナー。前置きなしに、すぐ以下の形式で夕食の献立を3つ提案してください。
-条件：構成は「${mealDesc}」、${settings.familySize}人分。${priorityRule}${timeRule}${fishRule}
-必ず次の形式で3案を出力：
+    const systemPrompt = `家庭料理の献立プランナー。前置き・挨拶・説明は一切不要。「1．【」から即座に開始。
+条件：「${mealDesc}」構成、${settings.familySize}人分。${priorityRule}${timeRule}${fishRule}
+3案を以下の形式で出力（各項目は1行・簡潔に）：
 1．【料理名】
-使用食材:
-材料の目安:（${settings.familySize}人分）
-調理時間: 約○分
-難易度: ★〜★★★
-作り方:（3〜4ステップ）
+使用食材: ○○、○○、○○（列挙のみ）
+調理時間: 約○分／難易度: ★〜★★★
+作り方: ①… ②… ③… ④…
 
 2．【料理名】
-…
+…（同形式）
 
 3．【料理名】
-…`;
+…（同形式）`;
 
     const userMsg = [
       rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`   : "",
       retortItems.length ? `【レトルト品】: ${retortItems.join("、")}` : "",
     ].filter(Boolean).join("\n");
 
-    const fullPrompt = `${systemPrompt}\n\n今日の食材：\n${userMsg}\n\n夕食の献立を3つ提案してください。`;
+    const fullPrompt = `${systemPrompt}\n\n今日の食材：\n${userMsg}`;
+    setPromptForCopy(fullPrompt);
 
     try {
       const res = await fetch(
@@ -329,7 +330,7 @@ export default function KitchenManager({ user }) {
         { method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
-            contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}\n\n前置きなし・説明なし・挨拶なし。「1．【」から即座に始めること。` }] }],
+            contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}` }] }],
             generationConfig:{ maxOutputTokens:3000 },
           }),
         }
@@ -850,6 +851,28 @@ export default function KitchenManager({ user }) {
                         <span style={S.madeSelectName}>{r.title}</span>
                       </button>
                     ))}
+                  </div>
+                )}
+                {promptForCopy && (
+                  <div style={{ marginTop:8 }}>
+                    <button style={S.manualToggleBtn} onClick={()=>setShowPromptPanel(v=>!v)}>
+                      {showPromptPanel ? "▲ プロンプトを閉じる" : "📋 他のAIに投げるプロンプトを表示"}
+                    </button>
+                    {showPromptPanel && (
+                      <div style={S.fallbackCard}>
+                        <div style={S.fallbackLinks}>
+                          <a href="https://claude.ai" target="_blank" rel="noreferrer" style={S.fallbackLink}>Claude.ai →</a>
+                          <a href="https://chatgpt.com" target="_blank" rel="noreferrer" style={S.fallbackLink}>ChatGPT →</a>
+                        </div>
+                        <pre style={S.fallbackPre}>{promptForCopy}</pre>
+                        <button style={S.fallbackCopyBtn} onClick={()=>{
+                          navigator.clipboard.writeText(promptForCopy);
+                          setCopied(true); setTimeout(()=>setCopied(false), 2500);
+                        }}>
+                          {copied ? "✅ コピーしました！" : "📋 プロンプトをコピー"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
