@@ -375,8 +375,14 @@ ${mealFormat}
         ratings:{}, memo:"", createdAt:new Date().toISOString(), madeIndices:[], madeComponents:null,
       };
       setHistory(prev => [entry, ...prev].slice(0, 30));
-      const dbRes = await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[], made_components:null });
-      if (dbRes.error) console.error("Supabase insert error:", dbRes.error);
+      const insertData = { id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[] };
+      const dbRes = await supabase.from("history").insert(insertData);
+      if (dbRes.error) {
+        console.error("Supabase insert error:", dbRes.error);
+      } else {
+        // made_components は列が存在する場合のみ更新（エラーは無視）
+        supabase.from("history").update({ made_components:null }).eq("id", entry.id).then(()=>{});
+      }
     } catch(e) {
       console.error("getSuggestions failed:", e);
       setFallbackPrompt(fullPrompt);
