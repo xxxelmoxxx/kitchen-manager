@@ -44,6 +44,13 @@ function getCategoryIcon(name) {
   return { icon:"🫙", color:"#A0AEC0", bg:"#F7FAFC" };
 }
 
+function parseComponents(recipe) {
+  const main = recipe.content.match(/🍖[^:：\n]*[:：]\s*([^／/\n]+)/)?.[1]?.trim() || null;
+  const side = recipe.content.match(/🥗[^:：\n]*[:：]\s*([^／/\n]+)/)?.[1]?.trim() || null;
+  const soup = recipe.content.match(/🍜[^:：\n]*[:：]\s*([^／/\n]+)/)?.[1]?.trim() || null;
+  return { main, side, soup };
+}
+
 function parseRecipes(text) {
   const blocks = text.split(/(?=\d+[.．]\s*【)/m)
     .filter(b => b.trim() && /【.+?】/.test(b));
@@ -101,6 +108,7 @@ export default function KitchenManager({ user }) {
   const [copied, setCopied] = useState(false);
   const [promptForCopy, setPromptForCopy] = useState("");
   const [showPromptPanel, setShowPromptPanel] = useState(false);
+  const [selectedComponents, setSelectedComponents] = useState({ main:null, side:null, soup:null });
 
   const [showManual, setShowManual] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
@@ -138,7 +146,7 @@ export default function KitchenManager({ user }) {
       setHistory(hRes.data.map(r => ({
         id:r.id, date:r.date, recipes:r.recipes, ingredients:r.ingredients,
         ratings:r.ratings||{}, memo:r.memo||"", createdAt:r.created_at,
-        madeIndices:r.made_indices||[],
+        madeIndices:r.made_indices||[], madeComponents:r.made_components||null,
       })));
     }
     if (sRes.data?.data) setSettings({ ...DEFAULT_SETTINGS, ...sRes.data.data });
@@ -291,6 +299,7 @@ export default function KitchenManager({ user }) {
       return;
     }
     setError(""); setFallbackPrompt(""); setLoading(true); setView("results"); setRecipes(null);
+    setSelectedComponents({ main:null, side:null, soup:null });
 
     const priorityItems = [
       ...ingredients.fridge.filter(i=>i.priority).map(i=>i.name),
@@ -361,10 +370,10 @@ ${mealFormat}
         id:crypto.randomUUID(),
         date: new Date().toLocaleString("ja-JP", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }),
         recipes:parsed, ingredients:{ raw:rawItems, retort:retortItems },
-        ratings:{}, memo:"", createdAt:new Date().toISOString(), madeIndices:[],
+        ratings:{}, memo:"", createdAt:new Date().toISOString(), madeIndices:[], madeComponents:null,
       };
       setHistory(prev => [entry, ...prev].slice(0, 30));
-      const dbRes = await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[] });
+      const dbRes = await supabase.from("history").insert({ id:entry.id, user_id:user.id, date:entry.date, recipes:entry.recipes, ingredients:entry.ingredients, ratings:{}, memo:"", made_indices:[], made_components:null });
       if (dbRes.error) console.error("Supabase insert error:", dbRes.error);
     } catch(e) {
       console.error("getSuggestions failed:", e);
@@ -415,6 +424,13 @@ ${mealFormat}
     await supabase.from("history").update({ made_indices:madeIndices }).eq("id", histId);
   };
 
+  const saveMadeComponents = async (histId, components) => {
+    const u = history.map(h => h.id!==histId ? h : { ...h, madeComponents:components });
+    setHistory(u);
+    if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
+    await supabase.from("history").update({ made_components:components }).eq("id", histId);
+  };
+
   const saveManualRecipe = async () => {
     const title = manualTitle.trim(); if (!title) return;
     const d = new Date(manualDate);
@@ -445,16 +461,16 @@ ${mealFormat}
   const totalRaw    = counts.fridge.ingredient + counts.freezer.ingredient;
   const totalRetort = counts.fridge.retort     + counts.freezer.retort;
 
-  // 作った献立（全履歴からmadeIndicesがあるものを抽出）
-  const madeRecipes = history.flatMap(h =>
-    (h.madeIndices || []).map(idx => ({
-      histId:   h.id,
-      date:     h.date,
-      recipe:   h.recipes[idx],
-      rating:   h.ratings[idx] || 0,
-      memo:     h.memo,
-    }))
-  );
+  // 作った献立（コンポーネント選択 or 旧インデックス方式）
+  const madeRecipes = history.flatMap(h => {
+    if (h.madeComponents && Object.keys(h.madeComponents).length > 0) {
+      return [{ histId:h.id, date:h.date, madeComponents:h.madeComponents, memo:h.memo, type:"components" }];
+    }
+    return (h.madeIndices||[]).map(idx => ({
+      histId:h.id, date:h.date, recipe:h.recipes[idx],
+      rating:h.ratings[idx]||0, memo:h.memo, type:"recipe",
+    }));
+  });
 
   if (dataLoading) return (
     <div style={S.app}>
@@ -848,20 +864,82 @@ ${mealFormat}
                     )}
                   </div>
                 ))}
-                {history.length>0 && (
-                  <div style={S.madeSelectionCard}>
-                    <div style={S.madeSelectionTitle}>🍳 今日はどれを作りましたか？</div>
-                    <div style={S.madeSelectionSub}>実際に作ったレシピをタップして記録しましょう（複数選択可）</div>
-                    {recipes.map((r,i)=>(
-                      <button key={i}
-                        style={{...S.madeSelectBtn,...((history[0].madeIndices||[]).includes(i)?S.madeSelectBtnOn:{})}}
-                        onClick={()=>toggleMade(history[0].id,i)}>
-                        <span style={S.madeSelectCheck}>{(history[0].madeIndices||[]).includes(i)?"✅":"☐"}</span>
-                        <span style={S.madeSelectName}>{r.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {history.length>0 && (()=>{
+                  const compData = recipes.map((r,idx)=>({ idx, ...parseComponents(r) }));
+                  const hasComps = compData.some(c=>c.main && (c.side||c.soup));
+                  const saved = history[0].madeComponents;
+                  const TYPES = [
+                    { key:"main", emoji:"🍖", label:"主菜", required:true  },
+                    { key:"side", emoji:"🥗", label:"副菜", required:false },
+                    { key:"soup", emoji:"🍜", label:"汁物", required:false },
+                  ];
+                  if (!hasComps) return (
+                    <div style={S.madeSelectionCard}>
+                      <div style={S.madeSelectionTitle}>🍳 今日はどれを作りましたか？</div>
+                      <div style={S.madeSelectionSub}>実際に作ったレシピをタップして記録（複数選択可）</div>
+                      {recipes.map((r,i)=>(
+                        <button key={i} style={{...S.madeSelectBtn,...((history[0].madeIndices||[]).includes(i)?S.madeSelectBtnOn:{})}}
+                          onClick={()=>toggleMade(history[0].id,i)}>
+                          <span style={S.madeSelectCheck}>{(history[0].madeIndices||[]).includes(i)?"✅":"☐"}</span>
+                          <span style={S.madeSelectName}>{r.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                  return (
+                    <div style={S.madeSelectionCard}>
+                      <div style={S.madeSelectionTitle}>🍳 今日の組み合わせを選んでください</div>
+                      <div style={S.madeSelectionSub}>提案①②③から主菜・副菜・汁物をそれぞれ選んで記録</div>
+                      {saved && (
+                        <div style={S.savedCompsRow}>
+                          <span style={{ fontSize:11, color:"#2F855A", fontWeight:700 }}>✅ 記録済み：</span>
+                          {saved.main && <span style={S.savedCompChip}>🍖 {saved.main.name}</span>}
+                          {saved.side && <span style={S.savedCompChip}>🥗 {saved.side.name}</span>}
+                          {saved.soup && <span style={S.savedCompChip}>🍜 {saved.soup.name}</span>}
+                        </div>
+                      )}
+                      {TYPES.map(({ key, emoji, label, required }) => {
+                        const opts = compData.filter(c=>c[key]);
+                        if (!opts.length) return null;
+                        return (
+                          <div key={key} style={{ marginBottom:10 }}>
+                            <div style={S.compTypeLabel}>{emoji} {label}</div>
+                            {opts.map(c=>{
+                              const isSel = selectedComponents[key]?.recipeIdx===c.idx;
+                              return (
+                                <button key={c.idx}
+                                  style={{...S.madeSelectBtn,...(isSel?S.madeSelectBtnOn:{})}}
+                                  onClick={()=>setSelectedComponents(prev=>({...prev,[key]:isSel?null:{recipeIdx:c.idx,name:c[key]}}))} >
+                                  <span style={S.madeSelectCheck}>{isSel?"✅":"☐"}</span>
+                                  <span style={{fontSize:11,color:"#A0AEC0",marginRight:4,flexShrink:0}}>提案{c.idx+1}</span>
+                                  <span style={S.madeSelectName}>{c[key]}</span>
+                                </button>
+                              );
+                            })}
+                            {!required && (
+                              <button style={{...S.madeSelectBtn,...(selectedComponents[key]==="none"?S.madeSelectBtnOn:{})}}
+                                onClick={()=>setSelectedComponents(prev=>({...prev,[key]:prev[key]==="none"?null:"none"}))}>
+                                <span style={S.madeSelectCheck}>{selectedComponents[key]==="none"?"✅":"☐"}</span>
+                                <span style={{...S.madeSelectName,color:"#A0AEC0"}}>なし</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {selectedComponents.main && (
+                        <button style={{...S.suggestBtn,marginTop:8,fontSize:13,padding:"11px",background:"linear-gradient(135deg,#48BB78,#2F855A)",boxShadow:"0 4px 14px rgba(72,187,120,0.4)"}}
+                          onClick={()=>{
+                            const comps = {};
+                            if (selectedComponents.main) comps.main = selectedComponents.main;
+                            if (selectedComponents.side && selectedComponents.side!=="none") comps.side = selectedComponents.side;
+                            if (selectedComponents.soup && selectedComponents.soup!=="none") comps.soup = selectedComponents.soup;
+                            saveMadeComponents(history[0].id, comps);
+                            setSelectedComponents({ main:null, side:null, soup:null });
+                          }}>✅ この組み合わせで記録する</button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {promptForCopy && (
                   <div style={{ marginTop:8 }}>
                     <button style={S.manualToggleBtn} onClick={()=>setShowPromptPanel(v=>!v)}>
@@ -906,16 +984,29 @@ ${mealFormat}
               madeRecipes.map((item, idx) => (
                 <div key={idx} style={{...S.recipeCard, animationDelay:`${idx*0.08}s`}} className="recipe-card">
                   <div style={S.recipeNum}>✅</div>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                    <div style={S.recipeTitle}>{item.recipe?.title}</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    {item.type==="components"
+                      ? <div style={S.recipeTitle}>{item.madeComponents.main?.name || "手作り献立"}</div>
+                      : <div style={S.recipeTitle}>{item.recipe?.title}</div>
+                    }
                     <div style={{ fontSize:11, color:"#A0AEC0", flexShrink:0, marginLeft:8 }}>📅 {item.date}</div>
                   </div>
-                  <div style={S.recipeContent}>{item.recipe?.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
-                  <div style={S.recipeFooter}>
-                    <div style={S.recipeRatingRow}>
-                      <span style={S.recipeRatingLabel}>評価：</span>
-                      <Stars value={item.rating} onChange={null}/>
+                  {item.type==="components" ? (
+                    <div style={{ fontSize:12, color:"#4A5568", lineHeight:2 }}>
+                      {item.madeComponents.main && <div>🍖 <b>主菜</b>：{item.madeComponents.main.name}</div>}
+                      {item.madeComponents.side && <div>🥗 <b>副菜</b>：{item.madeComponents.side.name}</div>}
+                      {item.madeComponents.soup && <div>🍜 <b>汁物</b>：{item.madeComponents.soup.name}</div>}
                     </div>
+                  ) : (
+                    <div style={S.recipeContent}>{item.recipe?.content.replace(/【.+?】/,"").replace(/^\d+[.．]\s*/,"").trim()}</div>
+                  )}
+                  <div style={S.recipeFooter}>
+                    {item.type==="recipe" && (
+                      <div style={S.recipeRatingRow}>
+                        <span style={S.recipeRatingLabel}>評価：</span>
+                        <Stars value={item.rating} onChange={null}/>
+                      </div>
+                    )}
                     {item.memo && <div style={{ fontSize:11, color:"#718096", fontStyle:"italic" }}>📝 {item.memo}</div>}
                   </div>
                 </div>
@@ -1160,10 +1251,13 @@ const S = {
   madeSelectionCard:{background:"white",borderRadius:14,padding:16,marginTop:4,marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,0.06)",border:"2px solid #9AE6B4"},
   madeSelectionTitle:{fontSize:15,fontWeight:800,color:"#2F855A",marginBottom:4},
   madeSelectionSub:{fontSize:11,color:"#718096",marginBottom:12},
-  madeSelectBtn:{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:10,border:"1.5px solid #E2E8F0",background:"#F7FAFC",cursor:"pointer",marginBottom:7,textAlign:"left",transition:"all .15s"},
+  madeSelectBtn:{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 12px",borderRadius:10,border:"1.5px solid #E2E8F0",background:"#F7FAFC",cursor:"pointer",marginBottom:6,textAlign:"left",transition:"all .15s"},
   madeSelectBtnOn:{background:"#F0FFF4",borderColor:"#68D391"},
-  madeSelectCheck:{fontSize:18,flexShrink:0,width:22},
+  madeSelectCheck:{fontSize:16,flexShrink:0,width:20},
   madeSelectName:{fontSize:13,fontWeight:600,color:"#2D3748"},
+  compTypeLabel:{fontSize:12,fontWeight:700,color:"#4A5568",marginBottom:5,marginTop:2},
+  savedCompsRow:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12,padding:"8px 10px",background:"#F0FFF4",borderRadius:9,alignItems:"center"},
+  savedCompChip:{fontSize:11,background:"#C6F6D5",color:"#276749",borderRadius:8,padding:"2px 8px",fontWeight:600},
 
   histDetailHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12},
   histDetailDate:{fontSize:14,fontWeight:700,color:"#2D3748"},
