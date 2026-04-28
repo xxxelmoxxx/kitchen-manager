@@ -430,7 +430,11 @@ ${mealFormat}
     const u = history.map(h => h.id!==histId ? h : { ...h, madeComponents:components });
     setHistory(u);
     if (histDetail?.id === histId) setHistDetail(u.find(h => h.id===histId));
-    await supabase.from("history").update({ made_components:components }).eq("id", histId);
+    const { error } = await supabase.from("history").update({ made_components:components }).eq("id", histId);
+    if (error) {
+      console.error("saveMadeComponents error:", error);
+      alert("保存に失敗しました。Supabaseで「alter table history add column if not exists made_components jsonb default null;」を実行してください。");
+    }
   };
   const rateComponent = async (histId, compKey, rating) => {
     const entry = history.find(h => h.id===histId);
@@ -482,7 +486,7 @@ ${mealFormat}
       return [{ histId:h.id, date:h.date, madeComponents:h.madeComponents, memo:h.memo, type:"components" }];
     }
     return (h.madeIndices||[]).map(idx => ({
-      histId:h.id, date:h.date, recipe:h.recipes[idx],
+      histId:h.id, date:h.date, recipe:h.recipes[idx], recipeIdx:idx,
       rating:h.ratings[idx]||0, memo:h.memo, type:"recipe",
     }));
   });
