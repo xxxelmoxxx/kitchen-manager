@@ -302,19 +302,28 @@ export default function KitchenManager({ user }) {
     const fishRule     = fishThisWeek === 0 ? "・今週まだ魚料理を食べていないので、3案のうち少なくとも1案は魚料理を含めてください。"
                        : fishThisWeek < 2  ? "・今週の魚料理が少ないので、できれば1案は魚料理を含めてください。" : "";
 
-    const systemPrompt = `家庭料理の献立プランナー。前置き・挨拶・説明は一切不要。「1．【」から即座に開始。
-条件：「${mealDesc}」構成、${settings.familySize}人分。${priorityRule}${timeRule}${fishRule}
-3案を以下の形式で出力（各項目は1行・簡潔に）：
-1．【料理名】
-使用食材: ○○、○○、○○（列挙のみ）
+    const mealFormat = settings.mealComposition === "full"
+      ? `🍖 主菜: ○○ ／ 食材: ○○、○○ ／ 手順: ①②③
+🥗 副菜: ○○ ／ 食材: ○○、○○ ／ 手順: ①②
+🍜 汁物: ○○ ／ 食材: ○○、○○ ／ 手順: ①②`
+      : settings.mealComposition === "main_side"
+      ? `🍖 主菜: ○○ ／ 食材: ○○、○○ ／ 手順: ①②③
+🥗 副菜: ○○ ／ 食材: ○○、○○ ／ 手順: ①②`
+      : `🍖 主菜: ○○ ／ 食材: ○○、○○ ／ 手順: ①②③`;
+
+    const systemPrompt = `家庭料理の献立プランナー。前置き・挨拶・余計な説明は一切不要。「1．【」から即座に開始。
+条件：${settings.familySize}人分。${priorityRule}${timeRule}${fishRule}
+夕食の献立を3案、以下の形式で出力：
+
+1．【献立の総称】
+${mealFormat}
 調理時間: 約○分／難易度: ★〜★★★
-作り方: ①… ②… ③… ④…
 
-2．【料理名】
-…（同形式）
+2．【献立の総称】
+（同形式）
 
-3．【料理名】
-…（同形式）`;
+3．【献立の総称】
+（同形式）`;
 
     const userMsg = [
       rawItems.length    ? `【要調理の食材】: ${rawItems.join("、")}`   : "",
@@ -331,7 +340,7 @@ export default function KitchenManager({ user }) {
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
             contents:[{ role:"user", parts:[{ text:`今日の食材：\n${userMsg}` }] }],
-            generationConfig:{ maxOutputTokens:3000 },
+            generationConfig:{ maxOutputTokens:4000, thinkingConfig:{ thinkingBudget:0 } },
           }),
         }
       );
