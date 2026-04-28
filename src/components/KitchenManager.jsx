@@ -317,7 +317,7 @@ export default function KitchenManager({ user }) {
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
         { method:"POST", headers:{ "Content-Type":"application/json" },
           body: JSON.stringify({
             system_instruction:{ parts:[{ text:systemPrompt }] },
@@ -729,14 +729,10 @@ export default function KitchenManager({ user }) {
                       </div>
                     );
                   })}
-                  <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                    <button style={{...S.suggestBtn, flex:1, fontSize:13, padding:"10px"}}
-                      onClick={importFromNotion} disabled={notionSelected.size===0}>
-                      ✅ 選択した{notionSelected.size}品を取り込む
-                    </button>
-                    <button style={{...S.optChip, padding:"10px 14px", fontSize:13}}
-                      onClick={closeNotionImport}>取り込まない</button>
-                  </div>
+                  <button style={{...S.suggestBtn, marginTop:8, fontSize:13, padding:"10px"}}
+                    onClick={importFromNotion} disabled={notionSelected.size===0}>
+                    ✅ 選択した{notionSelected.size}品を取り込む
+                  </button>
                 </div>
               )}
             </div>
