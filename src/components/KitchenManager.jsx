@@ -95,7 +95,8 @@ export default function KitchenManager({ user }) {
   const [showOptions, setShowOptions] = useState(false);
 
   // Notion連携
-  const [notionLoading,  setNotionLoading]  = useState(false);
+  const [notionLoading,  setNotionLoading]  = useState(false);  // fetch / import 中
+  const [notionAdding,   setNotionAdding]   = useState(false);  // 単品追加中（オーバーレイ用）
   const [notionMsg,      setNotionMsg]      = useState("");
   const [notionItems,    setNotionItems]    = useState([]);
   const [notionSelected, setNotionSelected] = useState(new Set());
@@ -217,7 +218,7 @@ export default function KitchenManager({ user }) {
   const showNotionMsg = (msg) => { setNotionMsg(msg); setTimeout(()=>setNotionMsg(""), 3000); };
 
   const addToNotion = async (name) => {
-    setNotionLoading(true);
+    setNotionAdding(true);
     try {
       const res = await fetch("/api/notion?action=write", {
         method:"POST", headers:{ "Content-Type":"application/json" },
@@ -226,7 +227,7 @@ export default function KitchenManager({ user }) {
       if (!res.ok) throw new Error();
       showNotionMsg(`🛒「${name}」を買い物リストに追加しました`);
     } catch { showNotionMsg("❌ Notion連携に失敗しました"); }
-    setNotionLoading(false);
+    setNotionAdding(false);
   };
 
   const fetchFromNotion = async () => {
@@ -728,9 +729,9 @@ ${mealFormat}
                               <button style={S.priorityBtn} onClick={()=>togglePriority(loc,item.id)}>
                                 {item.priority?"⭐":"☆"}
                               </button>
-                              <button style={{...S.notionBtn,...(notionLoading?{opacity:0.3,cursor:"not-allowed"}:{})}}
-                                onClick={()=>!notionLoading&&addToNotion(item.name)} title={notionLoading?"追加中…":"買い物リストに追加"}>
-                                {notionLoading?"⏳":"🛒"}
+                              <button style={{...S.notionBtn,...(notionAdding?{opacity:0.3,cursor:"not-allowed"}:{})}}
+                                onClick={()=>!notionAdding&&addToNotion(item.name)} title={notionAdding?"追加中…":"買い物リストに追加"}>
+                                {notionAdding?"⏳":"🛒"}
                               </button>
                               <button style={S.deleteBtn} onClick={()=>removeIngredient(loc,item.id)}>✕</button>
                             </div>
@@ -1188,6 +1189,17 @@ ${mealFormat}
           </div>
         )}
       </main>
+
+      {/* Notion 追加中オーバーレイ */}
+      {notionAdding && (
+        <div style={S.notionOverlay}>
+          <div style={S.notionOverlayBox}>
+            <div style={S.spinner} className="spin"/>
+            <div style={{ fontSize:14, fontWeight:700, color:"#2D3748" }}>追加中…</div>
+            <div style={{ fontSize:11, color:"#718096" }}>しばらくお待ちください</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1353,6 +1365,9 @@ const S = {
   histDetailDate:{fontSize:14,fontWeight:700,color:"#2D3748"},
   histDeleteBtn:{padding:"5px 10px",borderRadius:8,border:"1.5px solid #FED7D7",background:"#FFF5F5",color:"#E53E3E",fontSize:12,cursor:"pointer"},
   memoInput:{width:"100%",padding:"8px 10px",borderRadius:8,border:"1.5px solid #E2E8F0",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit",boxSizing:"border-box"},
+
+  notionOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.38)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"},
+  notionOverlayBox:{background:"white",borderRadius:18,padding:"28px 36px",display:"flex",flexDirection:"column",alignItems:"center",gap:10,boxShadow:"0 10px 36px rgba(0,0,0,0.22)"},
 };
 
 const css = `
