@@ -109,9 +109,11 @@ export default function KitchenManager({ user }) {
   const [copied, setCopied] = useState(false);
   const [promptForCopy, setPromptForCopy] = useState("");
   const [showPromptPanel, setShowPromptPanel] = useState(false);
-  const [selectedComponents, setSelectedComponents] = useState({ main:null, side:null, soup:null });
-  const [panelCustomName,   setPanelCustomName]   = useState("");
-  const [panelMemo,         setPanelMemo]         = useState("");
+  const [panelMain,  setPanelMain]  = useState("");
+  const [panelSide,  setPanelSide]  = useState("");
+  const [panelSoup,  setPanelSoup]  = useState("");
+  const [panelOther, setPanelOther] = useState("");
+  const [panelMemo,  setPanelMemo]  = useState("");
   const [editingMadeId,  setEditingMadeId]  = useState(null);
   const [editingMemo,    setEditingMemo]    = useState("");
 
@@ -304,7 +306,7 @@ export default function KitchenManager({ user }) {
       return;
     }
     setError(""); setFallbackPrompt(""); setLoading(true); setView("results"); setRecipes(null);
-    setSelectedComponents({ main:null, side:null, soup:null }); setPanelCustomName(""); setPanelMemo("");
+    setPanelMain(""); setPanelSide(""); setPanelSoup(""); setPanelOther(""); setPanelMemo("");
 
     const priorityItems = [
       ...ingredients.fridge.filter(i=>i.priority).map(i=>i.name),
@@ -508,6 +510,95 @@ ${mealFormat}
       </div>
     </div>
   );
+
+  // ── 作った献立 記録パネル ────────────────────────────
+  const renderRecordingPanel = (histId, recipesList, savedComps) => {
+    const compData = recipesList.map((r, idx) => ({ idx, ...parseComponents(r) }));
+    const COMPS = [
+      { key:"main", emoji:"🍖", label:"主菜", state:panelMain, set:setPanelMain },
+      { key:"side", emoji:"🥗", label:"副菜", state:panelSide, set:setPanelSide },
+      { key:"soup", emoji:"🍜", label:"汁物", state:panelSoup, set:setPanelSoup },
+    ];
+    const hasContent = panelMain.trim() || panelSide.trim() || panelSoup.trim() || panelOther.trim();
+    const doSave = async () => {
+      const comps = {};
+      if (panelMain.trim())  comps.main  = { name:panelMain.trim() };
+      if (panelSide.trim())  comps.side  = { name:panelSide.trim() };
+      if (panelSoup.trim())  comps.soup  = { name:panelSoup.trim() };
+      if (panelOther.trim()) comps.other = { name:panelOther.trim() };
+      await saveMadeComponents(histId, comps);
+      if (panelMemo.trim()) await updateMemo(histId, panelMemo.trim());
+      setPanelMain(""); setPanelSide(""); setPanelSoup(""); setPanelOther(""); setPanelMemo("");
+    };
+    return (
+      <div style={S.madeSelectionCard}>
+        <div style={S.madeSelectionTitle}>🍳 作った献立を記録する</div>
+        <div style={S.madeSelectionSub}>主菜・副菜・汁物のどれか一つから記録できます。AI提案を選ぶか自由に入力してください</div>
+        {savedComps && Object.keys(savedComps).length > 0 && (
+          <div style={S.savedCompsRow}>
+            <span style={{ fontSize:11, color:"#2F855A", fontWeight:700 }}>✅ 記録済み：</span>
+            {savedComps.main  && <span style={S.savedCompChip}>🍖 {savedComps.main.name}</span>}
+            {savedComps.side  && <span style={S.savedCompChip}>🥗 {savedComps.side.name}</span>}
+            {savedComps.soup  && <span style={S.savedCompChip}>🍜 {savedComps.soup.name}</span>}
+            {savedComps.other && <span style={S.savedCompChip}>🍽️ {savedComps.other.name}</span>}
+          </div>
+        )}
+        {COMPS.map(({ key, emoji, label, state, set }) => {
+          const opts = compData.filter(c => c[key]);
+          return (
+            <div key={key} style={{ marginBottom:12 }}>
+              <div style={S.compTypeLabel}>{emoji} {label}</div>
+              {opts.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:6 }}>
+                  {opts.map(c => (
+                    <button key={c.idx}
+                      style={{...S.compSuggChip,...(state===c[key]?S.compSuggChipOn:{})}}
+                      onClick={()=>set(state===c[key]?"":c[key])}>
+                      <span style={{ fontSize:10, color: state===c[key]?"#276749":"#A0AEC0" }}>提案{c.idx+1} </span>{c[key]}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <input
+                style={{...S.input, width:"100%", boxSizing:"border-box", fontSize:12}}
+                value={state}
+                onChange={e=>set(e.target.value)}
+                placeholder={opts.length>0 ? "↑ 上から選ぶか、直接入力…" : `${label}を入力（任意）`}
+              />
+            </div>
+          );
+        })}
+        <div style={{ marginBottom:10 }}>
+          <div style={S.compTypeLabel}>🍽️ その他（自由入力）</div>
+          <input
+            style={{...S.input, width:"100%", boxSizing:"border-box", fontSize:12}}
+            value={panelOther}
+            onChange={e=>setPanelOther(e.target.value)}
+            placeholder="例：サムギョプサル風、残り物アレンジ…"
+          />
+        </div>
+        <div style={{ marginBottom:8 }}>
+          <div style={S.compTypeLabel}>📝 メモ（任意）</div>
+          <textarea
+            style={{...S.memoInput, fontSize:12}}
+            rows={2}
+            value={panelMemo}
+            onChange={e=>setPanelMemo(e.target.value)}
+            placeholder="感想・次回へのメモなど…"
+          />
+        </div>
+        {hasContent ? (
+          <button
+            style={{...S.suggestBtn, marginTop:4, fontSize:13, padding:"11px", background:"linear-gradient(135deg,#48BB78,#2F855A)", boxShadow:"0 4px 14px rgba(72,187,120,0.4)"}}
+            onClick={doSave}>
+            ✅ この内容で記録する
+          </button>
+        ) : (
+          <div style={{ fontSize:11, color:"#CBD5E0", textAlign:"center", paddingTop:4 }}>いずれかの項目を入力すると記録できます</div>
+        )}
+      </div>
+    );
+  };
 
   // ── 提案オプションUI ────────────────────────────────
   const OptionsPanel = () => (
@@ -892,102 +983,7 @@ ${mealFormat}
                     )}
                   </div>
                 ))}
-                {history.length>0 && (()=>{
-                  const compData = recipes.map((r,idx)=>({ idx, ...parseComponents(r) }));
-                  const hasComps = compData.some(c=>c.main && (c.side||c.soup));
-                  const saved = history[0].madeComponents;
-                  const TYPES = [
-                    { key:"main", emoji:"🍖", label:"主菜", required:true  },
-                    { key:"side", emoji:"🥗", label:"副菜", required:false },
-                    { key:"soup", emoji:"🍜", label:"汁物", required:false },
-                  ];
-                  if (!hasComps) return (
-                    <div style={S.madeSelectionCard}>
-                      <div style={S.madeSelectionTitle}>🍳 今日はどれを作りましたか？</div>
-                      <div style={S.madeSelectionSub}>実際に作ったレシピをタップして記録（複数選択可）</div>
-                      {recipes.map((r,i)=>(
-                        <button key={i} style={{...S.madeSelectBtn,...((history[0].madeIndices||[]).includes(i)?S.madeSelectBtnOn:{})}}
-                          onClick={()=>toggleMade(history[0].id,i)}>
-                          <span style={S.madeSelectCheck}>{(history[0].madeIndices||[]).includes(i)?"✅":"☐"}</span>
-                          <span style={S.madeSelectName}>{r.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  );
-                  return (
-                    <div style={S.madeSelectionCard}>
-                      <div style={S.madeSelectionTitle}>🍳 今日の組み合わせを選んでください</div>
-                      <div style={S.madeSelectionSub}>提案①②③から主菜・副菜・汁物をそれぞれ選んで記録</div>
-                      {saved && (
-                        <div style={S.savedCompsRow}>
-                          <span style={{ fontSize:11, color:"#2F855A", fontWeight:700 }}>✅ 記録済み：</span>
-                          {saved.main && <span style={S.savedCompChip}>🍖 {saved.main.name}</span>}
-                          {saved.side && <span style={S.savedCompChip}>🥗 {saved.side.name}</span>}
-                          {saved.soup && <span style={S.savedCompChip}>🍜 {saved.soup.name}</span>}
-                        </div>
-                      )}
-                      {TYPES.map(({ key, emoji, label, required }) => {
-                        const opts = compData.filter(c=>c[key]);
-                        if (!opts.length) return null;
-                        return (
-                          <div key={key} style={{ marginBottom:10 }}>
-                            <div style={S.compTypeLabel}>{emoji} {label}</div>
-                            {opts.map(c=>{
-                              const isSel = selectedComponents[key]?.recipeIdx===c.idx;
-                              return (
-                                <button key={c.idx}
-                                  style={{...S.madeSelectBtn,...(isSel?S.madeSelectBtnOn:{})}}
-                                  onClick={()=>setSelectedComponents(prev=>({...prev,[key]:isSel?null:{recipeIdx:c.idx,name:c[key]}}))} >
-                                  <span style={S.madeSelectCheck}>{isSel?"✅":"☐"}</span>
-                                  <span style={{fontSize:11,color:"#A0AEC0",marginRight:4,flexShrink:0}}>提案{c.idx+1}</span>
-                                  <span style={S.madeSelectName}>{c[key]}</span>
-                                </button>
-                              );
-                            })}
-                            {!required && (
-                              <button style={{...S.madeSelectBtn,...(selectedComponents[key]==="none"?S.madeSelectBtnOn:{})}}
-                                onClick={()=>setSelectedComponents(prev=>({...prev,[key]:prev[key]==="none"?null:"none"}))}>
-                                <span style={S.madeSelectCheck}>{selectedComponents[key]==="none"?"✅":"☐"}</span>
-                                <span style={{...S.madeSelectName,color:"#A0AEC0"}}>なし</span>
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {/* 自由入力 */}
-                      <div style={{ marginTop:4, marginBottom:2 }}>
-                        <div style={S.compTypeLabel}>🍽️ その他・自由入力（任意）</div>
-                        <input style={{...S.input, width:"100%", boxSizing:"border-box", fontSize:12}}
-                          value={panelCustomName}
-                          onChange={e=>setPanelCustomName(e.target.value)}
-                          placeholder="例：サムギョプサル風、残り物アレンジ…"/>
-                      </div>
-                      {/* メモ */}
-                      <div style={{ marginTop:8, marginBottom:4 }}>
-                        <div style={S.compTypeLabel}>📝 メモ（任意）</div>
-                        <textarea style={{...S.memoInput, fontSize:12}} rows={2}
-                          value={panelMemo}
-                          onChange={e=>setPanelMemo(e.target.value)}
-                          placeholder="感想・次回へのメモなど…"/>
-                      </div>
-                      {/* 記録ボタン：主菜以外のみでも、自由入力のみでもOK */}
-                      {(Object.values(selectedComponents).some(v=>v&&v!=="none") || panelCustomName.trim()) && (
-                        <button style={{...S.suggestBtn,marginTop:6,fontSize:13,padding:"11px",background:"linear-gradient(135deg,#48BB78,#2F855A)",boxShadow:"0 4px 14px rgba(72,187,120,0.4)"}}
-                          onClick={async ()=>{
-                            const comps = {};
-                            if (selectedComponents.main && selectedComponents.main!=="none") comps.main = selectedComponents.main;
-                            if (selectedComponents.side && selectedComponents.side!=="none") comps.side = selectedComponents.side;
-                            if (selectedComponents.soup && selectedComponents.soup!=="none") comps.soup = selectedComponents.soup;
-                            if (panelCustomName.trim()) comps.other = { name:panelCustomName.trim() };
-                            await saveMadeComponents(history[0].id, comps);
-                            if (panelMemo.trim()) await updateMemo(history[0].id, panelMemo.trim());
-                            setSelectedComponents({ main:null, side:null, soup:null });
-                            setPanelCustomName(""); setPanelMemo("");
-                          }}>✅ この内容で記録する</button>
-                      )}
-                    </div>
-                  );
-                })()}
+                {history.length>0 && renderRecordingPanel(history[0].id, recipes, history[0].madeComponents)}
                 {promptForCopy && (
                   <div style={{ marginTop:8 }}>
                     <button style={S.manualToggleBtn} onClick={()=>setShowPromptPanel(v=>!v)}>
@@ -1128,20 +1124,10 @@ ${mealFormat}
                         <span style={S.recipeRatingLabel}>評価：</span>
                         <Stars value={histDetail.ratings[i]||0} onChange={s=>rateRecipe(histDetail.id,i,s)}/>
                       </div>
-                      <button
-                        style={{...S.madeBtn,...((histDetail.madeIndices||[]).includes(i)?S.madeBtnOn:{})}}
-                        onClick={()=>toggleMade(histDetail.id,i)}>
-                        {(histDetail.madeIndices||[]).includes(i)?"✅ 作った！":"☐ 作った？"}
-                      </button>
                     </div>
                   </div>
                 ))}
-                <div style={S.card}>
-                  <div style={S.cardTitle}>メモ</div>
-                  <textarea style={S.memoInput} value={histDetail.memo}
-                    onChange={e=>updateMemo(histDetail.id,e.target.value)}
-                    placeholder="感想や次回への改善点など…" rows={3}/>
-                </div>
+                {renderRecordingPanel(histDetail.id, histDetail.recipes, histDetail.madeComponents)}
               </div>
             ) : (
               <div>
@@ -1160,7 +1146,7 @@ ${mealFormat}
                   const hasFishRecipe = h.recipes.some(r=>FISH_KEYWORDS.some(k=>r.title.includes(k)));
                   const madeCount = (h.madeIndices||[]).length;
                   return (
-                    <div key={h.id} style={S.histCard} className="hist-card" onClick={()=>setHistDetail(h)}>
+                    <div key={h.id} style={S.histCard} className="hist-card" onClick={()=>{ setPanelMain(""); setPanelSide(""); setPanelSoup(""); setPanelOther(""); setPanelMemo(""); setHistDetail(h); }}>
                       <div style={S.histCardTop}>
                         <div style={S.histDate}>📅 {h.date}</div>
                         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -1353,6 +1339,8 @@ const S = {
   madeSelectCheck:{fontSize:16,flexShrink:0,width:20},
   madeSelectName:{fontSize:13,fontWeight:600,color:"#2D3748"},
   compTypeLabel:{fontSize:12,fontWeight:700,color:"#4A5568",marginBottom:5,marginTop:2},
+  compSuggChip:{padding:"5px 11px",borderRadius:20,border:"1.5px solid #E2E8F0",background:"#F7FAFC",fontSize:12,cursor:"pointer",color:"#4A5568",transition:"all .15s",textAlign:"left"},
+  compSuggChipOn:{background:"#F0FFF4",borderColor:"#68D391",color:"#276749",fontWeight:700},
   savedCompsRow:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12,padding:"8px 10px",background:"#F0FFF4",borderRadius:9,alignItems:"center"},
   savedCompChip:{fontSize:11,background:"#C6F6D5",color:"#276749",borderRadius:8,padding:"2px 8px",fontWeight:600},
   compRatingRow:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #F7FAFC",flexWrap:"wrap",gap:4},
