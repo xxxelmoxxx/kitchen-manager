@@ -109,6 +109,8 @@ export default function KitchenManager({ user }) {
   const [promptForCopy, setPromptForCopy] = useState("");
   const [showPromptPanel, setShowPromptPanel] = useState(false);
   const [selectedComponents, setSelectedComponents] = useState({ main:null, side:null, soup:null });
+  const [panelCustomName,   setPanelCustomName]   = useState("");
+  const [panelMemo,         setPanelMemo]         = useState("");
   const [editingMadeId,  setEditingMadeId]  = useState(null);
   const [editingMemo,    setEditingMemo]    = useState("");
 
@@ -301,7 +303,7 @@ export default function KitchenManager({ user }) {
       return;
     }
     setError(""); setFallbackPrompt(""); setLoading(true); setView("results"); setRecipes(null);
-    setSelectedComponents({ main:null, side:null, soup:null });
+    setSelectedComponents({ main:null, side:null, soup:null }); setPanelCustomName(""); setPanelMemo("");
 
     const priorityItems = [
       ...ingredients.fridge.filter(i=>i.priority).map(i=>i.name),
@@ -951,16 +953,36 @@ ${mealFormat}
                           </div>
                         );
                       })}
-                      {selectedComponents.main && (
-                        <button style={{...S.suggestBtn,marginTop:8,fontSize:13,padding:"11px",background:"linear-gradient(135deg,#48BB78,#2F855A)",boxShadow:"0 4px 14px rgba(72,187,120,0.4)"}}
-                          onClick={()=>{
+                      {/* 自由入力 */}
+                      <div style={{ marginTop:4, marginBottom:2 }}>
+                        <div style={S.compTypeLabel}>🍽️ その他・自由入力（任意）</div>
+                        <input style={{...S.input, width:"100%", boxSizing:"border-box", fontSize:12}}
+                          value={panelCustomName}
+                          onChange={e=>setPanelCustomName(e.target.value)}
+                          placeholder="例：サムギョプサル風、残り物アレンジ…"/>
+                      </div>
+                      {/* メモ */}
+                      <div style={{ marginTop:8, marginBottom:4 }}>
+                        <div style={S.compTypeLabel}>📝 メモ（任意）</div>
+                        <textarea style={{...S.memoInput, fontSize:12}} rows={2}
+                          value={panelMemo}
+                          onChange={e=>setPanelMemo(e.target.value)}
+                          placeholder="感想・次回へのメモなど…"/>
+                      </div>
+                      {/* 記録ボタン：主菜以外のみでも、自由入力のみでもOK */}
+                      {(Object.values(selectedComponents).some(v=>v&&v!=="none") || panelCustomName.trim()) && (
+                        <button style={{...S.suggestBtn,marginTop:6,fontSize:13,padding:"11px",background:"linear-gradient(135deg,#48BB78,#2F855A)",boxShadow:"0 4px 14px rgba(72,187,120,0.4)"}}
+                          onClick={async ()=>{
                             const comps = {};
-                            if (selectedComponents.main) comps.main = selectedComponents.main;
+                            if (selectedComponents.main && selectedComponents.main!=="none") comps.main = selectedComponents.main;
                             if (selectedComponents.side && selectedComponents.side!=="none") comps.side = selectedComponents.side;
                             if (selectedComponents.soup && selectedComponents.soup!=="none") comps.soup = selectedComponents.soup;
-                            saveMadeComponents(history[0].id, comps);
+                            if (panelCustomName.trim()) comps.other = { name:panelCustomName.trim() };
+                            await saveMadeComponents(history[0].id, comps);
+                            if (panelMemo.trim()) await updateMemo(history[0].id, panelMemo.trim());
                             setSelectedComponents({ main:null, side:null, soup:null });
-                          }}>✅ この組み合わせで記録する</button>
+                            setPanelCustomName(""); setPanelMemo("");
+                          }}>✅ この内容で記録する</button>
                       )}
                     </div>
                   );
@@ -1031,7 +1053,7 @@ ${mealFormat}
                     {/* コンポーネント表示 & 個別評価 */}
                     {item.type==="components" ? (
                       <div style={{ marginBottom:8 }}>
-                        {[["main","🍖","主菜"],["side","🥗","副菜"],["soup","🍜","汁物"]].map(([key,emoji,label])=>{
+                        {[["main","🍖","主菜"],["side","🥗","副菜"],["soup","🍜","汁物"],["other","🍽️","その他"]].map(([key,emoji,label])=>{
                           const comp = item.madeComponents[key];
                           if (!comp) return null;
                           return (
