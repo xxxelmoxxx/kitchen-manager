@@ -10,6 +10,7 @@ const EMPTY_RECIPE = {
   sourceUrl: "",
   sourceName: "",
   imageUrl: "",
+  imageUrls: [],
   servings: 2,
   ingredients: [{ name: "", quantity: "", unit: "", note: "" }],
   steps: [""],
@@ -71,6 +72,11 @@ const RECOMMENDED_RECIPES = [
 ];
 
 function toCamel(row) {
+  const imageUrls = Array.isArray(row.image_urls) && row.image_urls.length
+    ? row.image_urls
+    : row.image_url
+    ? [row.image_url]
+    : [];
   return {
     id: row.id,
     title: row.title || "",
@@ -78,7 +84,8 @@ function toCamel(row) {
     sourceType: row.source_type || "manual",
     sourceUrl: row.source_url || "",
     sourceName: row.source_name || "",
-    imageUrl: row.image_url || "",
+    imageUrl: row.image_url || imageUrls[0] || "",
+    imageUrls,
     servings: Number(row.servings || 2),
     ingredients: Array.isArray(row.ingredients) && row.ingredients.length ? row.ingredients : EMPTY_RECIPE.ingredients,
     steps: Array.isArray(row.steps) && row.steps.length ? row.steps : [""],
@@ -94,6 +101,10 @@ function toCamel(row) {
 }
 
 function toRow(recipe, userId) {
+  const imageUrls = (recipe.imageUrls || [])
+    .map(url => String(url || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
   return {
     id: recipe.id,
     user_id: userId,
@@ -102,7 +113,8 @@ function toRow(recipe, userId) {
     source_type: recipe.sourceType || "manual",
     source_url: recipe.sourceUrl || "",
     source_name: recipe.sourceName || "",
-    image_url: recipe.imageUrl || "",
+    image_url: imageUrls[0] || recipe.imageUrl || "",
+    image_urls: imageUrls,
     servings: Number(recipe.servings || 2),
     ingredients: recipe.ingredients.filter(i => i.name.trim()),
     steps: recipe.steps.map(s => s.trim()).filter(Boolean),
@@ -169,8 +181,9 @@ export default function RecipeBook({ user }) {
   }), [recipes, filterGenre, favoriteOnly]);
 
   const openRecipe = (recipe) => {
+    const imageUrls = (recipe.imageUrls?.length ? recipe.imageUrls : recipe.imageUrl ? [recipe.imageUrl] : []).slice(0, 3);
     setSelected(recipe.id || "new");
-    setDraft({ ...recipe, ingredients: recipe.ingredients.map(i => ({ ...i })), steps: [...recipe.steps], tags: [...recipe.tags] });
+    setDraft({ ...recipe, imageUrls, imageUrl: imageUrls[0] || "", ingredients: recipe.ingredients.map(i => ({ ...i })), steps: [...recipe.steps], tags: [...recipe.tags] });
     setTargetServings(Number(recipe.servings || 2));
     setMessage("");
   };
@@ -188,6 +201,7 @@ export default function RecipeBook({ user }) {
     const recipe = {
       ...nextDraft,
       id: nextDraft.id || crypto.randomUUID(),
+      imageUrls: (nextDraft.imageUrls || []).filter(Boolean).slice(0, 3),
       ingredients: nextDraft.ingredients.length ? nextDraft.ingredients : EMPTY_RECIPE.ingredients,
       steps: nextDraft.steps.length ? nextDraft.steps : [""],
     };
@@ -248,6 +262,7 @@ export default function RecipeBook({ user }) {
         sourceType: "url",
         sourceUrl,
         sourceName: data.recipe.sourceName || new URL(sourceUrl).hostname,
+        imageUrls: (data.recipe.imageUrls?.length ? data.recipe.imageUrls : data.recipe.imageUrl ? [data.recipe.imageUrl] : []).slice(0, 3),
       };
       openRecipe(imported);
       setUrl("");
@@ -268,6 +283,15 @@ export default function RecipeBook({ user }) {
 
   const setStep = (index, value) => {
     setDraft(prev => ({ ...prev, steps: prev.steps.map((step, i) => i === index ? value : step) }));
+  };
+
+  const setImageUrl = (index, value) => {
+    setDraft(prev => {
+      const imageUrls = [...(prev.imageUrls || [])];
+      imageUrls[index] = value;
+      const cleaned = imageUrls.slice(0, 3);
+      return { ...prev, imageUrls: cleaned, imageUrl: cleaned.find(Boolean) || "" };
+    });
   };
 
   if (draft) {
@@ -307,6 +331,27 @@ export default function RecipeBook({ user }) {
           <label style={S.fieldLabel}>出典URL
             <input style={S.input} value={draft.sourceUrl} onChange={e => setDraft({ ...draft, sourceUrl: e.target.value })} placeholder="https://..." />
           </label>
+          <div style={S.sectionTitle}>画像</div>
+          <div style={S.imageGrid}>
+            {[0, 1, 2].map(index => (
+              <div key={index} style={S.imageSlot}>
+                {draft.imageUrls?.[index] ? (
+                  <img src={draft.imageUrls[index]} alt={`${draft.title || "レシピ"} ${index + 1}`} style={S.recipeImage} />
+                ) : (
+                  <div style={S.imageEmpty}>画像 {index + 1}</div>
+                )}
+                <input
+                  style={S.imageInput}
+                  value={draft.imageUrls?.[index] || ""}
+                  onChange={e => setImageUrl(index, e.target.value)}
+                  placeholder="画像URL"
+                />
+                {draft.imageUrls?.[index] && (
+                  <button style={S.clearImageBtn} onClick={() => setImageUrl(index, "")}>削除</button>
+                )}
+              </div>
+            ))}
+          </div>
           <label style={S.fieldLabel}>タグ（カンマ区切り）
             <input style={S.input} value={draft.tags.join(", ")} onChange={e => setDraft({ ...draft, tags: parseTags(e.target.value) })} placeholder="時短, 鶏肉, 作り置き" />
           </label>
@@ -415,6 +460,7 @@ export default function RecipeBook({ user }) {
         <div style={S.list}>
           {filteredRecipes.map(recipe => (
             <button key={recipe.id} style={S.savedCard} onClick={() => openRecipe(recipe)}>
+              {(recipe.imageUrls?.[0] || recipe.imageUrl) && <img src={recipe.imageUrls?.[0] || recipe.imageUrl} alt="" style={S.savedImage} />}
               <div style={S.savedTop}>
                 <span style={S.genreBadge}>{recipe.genre}</span>
                 <span style={recipe.favorite ? S.starOn : S.starOff}>{recipe.favorite ? "★" : "☆"}</span>
@@ -467,6 +513,7 @@ const S = {
   saveSmallBtn: { width: "100%", marginTop: 9, padding: 8, borderRadius: 9, background: "#F0FFF4", border: "1.5px solid #9AE6B4", color: "#2F855A", fontSize: 12, fontWeight: 700, cursor: "pointer" },
   list: { display: "flex", flexDirection: "column", gap: 8 },
   savedCard: { textAlign: "left", background: "white", border: "1.5px solid transparent", borderRadius: 12, padding: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.06)", cursor: "pointer" },
+  savedImage: { width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: 10, marginBottom: 9, background: "#F7FAFC" },
   savedTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
   savedTitle: { fontSize: 14, fontWeight: 800, color: "#2D3748", marginBottom: 4 },
   savedMeta: { fontSize: 11, color: "#A0AEC0" },
@@ -485,6 +532,12 @@ const S = {
   favoriteBtnOn: { color: "#D69E2E", background: "#FFFFF0", borderColor: "#F6E05E" },
   metaGrid: { display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr", gap: 8, marginBottom: 10 },
   fieldLabel: { display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: "#4A5568", marginBottom: 10 },
+  imageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 10 },
+  imageSlot: { background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 11, padding: 8 },
+  recipeImage: { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: 9, background: "#EDF2F7", marginBottom: 7 },
+  imageEmpty: { width: "100%", aspectRatio: "4 / 3", borderRadius: 9, background: "white", border: "1.5px dashed #CBD5E0", color: "#A0AEC0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, marginBottom: 7 },
+  imageInput: { width: "100%", padding: "7px 8px", borderRadius: 8, border: "1.5px solid #E2E8F0", fontSize: 11, outline: "none", boxSizing: "border-box" },
+  clearImageBtn: { marginTop: 6, width: "100%", padding: 6, borderRadius: 8, border: "1px solid #FED7D7", background: "#FFF5F5", color: "#E53E3E", fontSize: 11, cursor: "pointer" },
   adjustNotice: { fontSize: 11, color: "#718096", marginBottom: 6 },
   ingredientRow: { display: "flex", gap: 6, marginBottom: 6 },
   stepRow: { display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 },

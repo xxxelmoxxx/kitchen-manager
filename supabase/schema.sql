@@ -61,6 +61,7 @@ create table if not exists saved_recipes (
   source_url     text default '',
   source_name    text default '',
   image_url      text default '',
+  image_urls     jsonb default '[]',
   servings       numeric default 2,
   ingredients    jsonb default '[]',
   steps          jsonb default '[]',
@@ -74,5 +75,6 @@ create table if not exists saved_recipes (
   updated_at     timestamptz default now()
 );
 
+alter table saved_recipes add column if not exists image_urls jsonb default '[]';
 alter table saved_recipes enable row level security;
 create policy "own saved recipes" on saved_recipes for all using (auth.uid() = user_id);

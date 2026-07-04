@@ -57,12 +57,38 @@ function ingredientsFrom(value) {
   return items.map(item => ({ name: textFrom(item), quantity: "", unit: "", note: "" })).filter(i => i.name);
 }
 
-function imageFrom(value) {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return imageFrom(value[0]);
-  if (typeof value === "object") return value.url || value.contentUrl || "";
-  return "";
+function collectImageUrls(value, urls = []) {
+  if (!value) return urls;
+  if (typeof value === "string") {
+    urls.push(value);
+    return urls;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(item => collectImageUrls(item, urls));
+    return urls;
+  }
+  if (typeof value === "object") {
+    if (value.url) urls.push(value.url);
+    if (value.contentUrl) urls.push(value.contentUrl);
+    if (value.thumbnailUrl) collectImageUrls(value.thumbnailUrl, urls);
+  }
+  return urls;
+}
+
+function absoluteUrl(value, baseUrl) {
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return "";
+  }
+}
+
+function imageUrlsFrom(value, baseUrl) {
+  return [...new Set(
+    collectImageUrls(value)
+      .map(url => absoluteUrl(String(url || "").trim(), baseUrl))
+      .filter(Boolean)
+  )].slice(0, 3);
 }
 
 function titleFromHtml(html) {
@@ -108,6 +134,9 @@ export default async function handler(req, res) {
     }
     const html = await response.text();
     const recipeNode = findRecipeNode(extractJsonLd(html));
+    const titleImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["'][^>]*>/i);
+    const fallbackImages = titleImageMatch?.[1] ? [absoluteUrl(titleImageMatch[1], parsed.toString())].filter(Boolean) : [];
     if (!recipeNode) {
       res.json({
         partial: true,
@@ -115,6 +144,8 @@ export default async function handler(req, res) {
           title: titleFromHtml(html) || parsed.hostname,
           sourceUrl: parsed.toString(),
           sourceName: parsed.hostname,
+          imageUrl: fallbackImages[0] || "",
+          imageUrls: fallbackImages,
           ingredients: [],
           steps: [],
           notes: "",
@@ -123,13 +154,16 @@ export default async function handler(req, res) {
       return;
     }
 
+    const imageUrls = imageUrlsFrom(recipeNode.image, parsed.toString());
+    const mergedImageUrls = [...new Set([...imageUrls, ...fallbackImages])].slice(0, 3);
     res.json({
       partial: false,
       recipe: {
         title: textFrom(recipeNode.name) || titleFromHtml(html) || parsed.hostname,
         sourceUrl: parsed.toString(),
         sourceName: parsed.hostname,
-        imageUrl: imageFrom(recipeNode.image),
+        imageUrl: mergedImageUrls[0] || "",
+        imageUrls: mergedImageUrls,
         servings: Number.parseFloat(textFrom(recipeNode.recipeYield)) || 2,
         ingredients: ingredientsFrom(recipeNode.recipeIngredient),
         steps: stepsFrom(recipeNode.recipeInstructions),
