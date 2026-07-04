@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase.js";
 
 const GENRES = ["和食", "洋食", "中華", "韓国", "エスニック", "副菜", "汁物", "お弁当", "その他"];
+const LOCAL_RECIPE_PREFIX = "ouchi-kitchen:saved-recipes:";
 
 const EMPTY_RECIPE = {
   title: "",
@@ -146,6 +147,15 @@ function scaleQuantity(quantity, baseServings, targetServings) {
   return Number.isInteger(scaled) ? String(scaled) : String(Math.round(scaled * 10) / 10);
 }
 
+function isMissingRecipeTable(error) {
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+  return text.includes("saved_recipes") && (
+    text.includes("schema cache") ||
+    text.includes("does not exist") ||
+    text.includes("Could not find the table")
+  );
+}
+
 export default function RecipeBook({ user }) {
   const [recipes, setRecipes] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -157,8 +167,37 @@ export default function RecipeBook({ user }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const localKey = `${LOCAL_RECIPE_PREFIX}${user.id}`;
 
   useEffect(() => { loadRecipes(); }, []);
+
+  const loadLocalRecipes = () => {
+    try {
+      const rows = JSON.parse(localStorage.getItem(localKey) || "[]");
+      return Array.isArray(rows) ? rows : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const writeLocalRecipes = (nextRecipes) => {
+    localStorage.setItem(localKey, JSON.stringify(nextRecipes));
+  };
+
+  const saveLocalRecipe = (recipe) => {
+    const saved = {
+      ...recipe,
+      createdAt: recipe.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [saved, ...loadLocalRecipes().filter(r => r.id !== saved.id)];
+    writeLocalRecipes(next);
+    return saved;
+  };
+
+  const deleteLocalRecipe = (id) => {
+    writeLocalRecipes(loadLocalRecipes().filter(r => r.id !== id));
+  };
 
   const loadRecipes = async () => {
     setLoading(true);
@@ -167,9 +206,18 @@ export default function RecipeBook({ user }) {
       .select("*")
       .order("updated_at", { ascending: false });
     if (error) {
-      setMessage("レシピ集の読み込みに失敗しました。Supabaseで saved_recipes テーブルを追加してください。");
+      const localRecipes = loadLocalRecipes();
+      setRecipes(localRecipes);
+      setMessage(isMissingRecipeTable(error)
+        ? "Supabaseのレシピ集テーブルがまだ無いため、この端末内の保存データを表示しています。DB反映後はクラウド保存できます。"
+        : "レシピ集をクラウドから読み込めなかったため、この端末内の保存データを表示しています。");
     } else {
-      setRecipes((data || []).map(toCamel));
+      const cloudRecipes = (data || []).map(toCamel);
+      const localOnly = loadLocalRecipes().filter(local => !cloudRecipes.some(cloud => cloud.id === local.id));
+      setRecipes([...localOnly, ...cloudRecipes]);
+      if (localOnly.length > 0) {
+        setMessage("この端末だけに保存されているレシピがあります。開いて保存するとクラウドにも保存できます。");
+      }
     }
     setLoading(false);
   };
@@ -207,9 +255,16 @@ export default function RecipeBook({ user }) {
     };
     const { error } = await supabase.from("saved_recipes").upsert(toRow(recipe, user.id));
     if (error) {
-      setMessage(`保存に失敗しました: ${error.message}`);
+      const saved = saveLocalRecipe(recipe);
+      setRecipes(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
+      setDraft(saved);
+      setSelected(saved.id);
+      setMessage(isMissingRecipeTable(error)
+        ? "Supabaseのレシピ集テーブルがまだ無いため、この端末に保存しました。DB反映後はクラウド保存に戻ります。"
+        : `クラウド保存に失敗したため、この端末に保存しました: ${error.message}`);
     } else {
       const saved = { ...recipe, updatedAt: new Date().toISOString() };
+      deleteLocalRecipe(saved.id);
       setRecipes(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
       setDraft(saved);
       setSelected(saved.id);
@@ -223,6 +278,7 @@ export default function RecipeBook({ user }) {
     setRecipes(prev => prev.filter(r => r.id !== draft.id));
     setSelected(null);
     setDraft(null);
+    deleteLocalRecipe(draft.id);
     await supabase.from("saved_recipes").delete().eq("id", draft.id);
   };
 
