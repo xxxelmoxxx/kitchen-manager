@@ -164,6 +164,8 @@ export default function RecipeBook({ user }) {
   const [filterGenre, setFilterGenre] = useState("すべて");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [url, setUrl] = useState("");
+  const [googleQuery, setGoogleQuery] = useState("");
+  const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -228,16 +230,17 @@ export default function RecipeBook({ user }) {
     return true;
   }), [recipes, filterGenre, favoriteOnly]);
 
-  const openRecipe = (recipe) => {
+  const openRecipe = (recipe, options = {}) => {
     const imageUrls = (recipe.imageUrls?.length ? recipe.imageUrls : recipe.imageUrl ? [recipe.imageUrl] : []).slice(0, 3);
     setSelected(recipe.id || "new");
     setDraft({ ...recipe, imageUrls, imageUrl: imageUrls[0] || "", ingredients: recipe.ingredients.map(i => ({ ...i })), steps: [...recipe.steps], tags: [...recipe.tags] });
     setTargetServings(Number(recipe.servings || 2));
+    setEditMode(Boolean(options.edit));
     setMessage("");
   };
 
   const newRecipe = () => {
-    openRecipe({ ...EMPTY_RECIPE, id: crypto.randomUUID(), sourceType: "manual" });
+    openRecipe({ ...EMPTY_RECIPE, id: crypto.randomUUID(), sourceType: "manual" }, { edit: true });
   };
 
   const saveRecipe = async (nextDraft = draft, notice = "保存しました") => {
@@ -259,6 +262,7 @@ export default function RecipeBook({ user }) {
       setRecipes(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
       setDraft(saved);
       setSelected(saved.id);
+      setEditMode(false);
       setMessage(isMissingRecipeTable(error)
         ? "Supabaseのレシピ集テーブルがまだ無いため、この端末に保存しました。DB反映後はクラウド保存に戻ります。"
         : `クラウド保存に失敗したため、この端末に保存しました: ${error.message}`);
@@ -268,6 +272,7 @@ export default function RecipeBook({ user }) {
       setRecipes(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
       setDraft(saved);
       setSelected(saved.id);
+      setEditMode(false);
       setMessage(notice);
     }
     setSaving(false);
@@ -320,11 +325,11 @@ export default function RecipeBook({ user }) {
         sourceName: data.recipe.sourceName || new URL(sourceUrl).hostname,
         imageUrls: (data.recipe.imageUrls?.length ? data.recipe.imageUrls : data.recipe.imageUrl ? [data.recipe.imageUrl] : []).slice(0, 3),
       };
-      openRecipe(imported);
+      openRecipe(imported, { edit: true });
       setUrl("");
       setMessage(data.partial ? "取れる範囲で読み込みました。必要に応じて手直ししてください。" : "URLから読み込みました。保存前に内容を確認してください。");
     } catch (e) {
-      openRecipe({ ...EMPTY_RECIPE, id: crypto.randomUUID(), sourceType: "url", sourceUrl, sourceName: safeHost(sourceUrl) });
+      openRecipe({ ...EMPTY_RECIPE, id: crypto.randomUUID(), sourceType: "url", sourceUrl, sourceName: safeHost(sourceUrl) }, { edit: true });
       setMessage(`自動取得できませんでした。URLだけ入れた編集画面を作りました: ${e.message}`);
     }
     setLoading(false);
@@ -349,6 +354,87 @@ export default function RecipeBook({ user }) {
       return { ...prev, imageUrls: cleaned, imageUrl: cleaned.find(Boolean) || "" };
     });
   };
+
+  const openGoogleSearch = () => {
+    const q = googleQuery.trim();
+    if (!q) return;
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(`${q} レシピ`)}`, "_blank", "noopener,noreferrer");
+  };
+
+  if (draft && !editMode) {
+    return (
+      <div className="fade-in">
+        <button style={S.backBtn} onClick={() => { setDraft(null); setSelected(null); }}>← レシピ集に戻る</button>
+        {message && <div style={S.message}>{message}</div>}
+        <div style={S.viewer}>
+          <div style={S.viewerTop}>
+            <div>
+              <div style={S.viewerTitle}>{draft.title}</div>
+              <div style={S.viewerMeta}>
+                <span style={S.genreBadge}>{draft.genre}</span>
+                {draft.favorite && <span style={S.starOn}>★</span>}
+                {draft.sourceName && <span>{draft.sourceName}</span>}
+              </div>
+            </div>
+            <button style={S.primaryMiniBtn} onClick={() => setEditMode(true)}>編集</button>
+          </div>
+
+          {draft.imageUrls?.filter(Boolean).length > 0 && (
+            <div style={S.viewerImageGrid}>
+              {draft.imageUrls.filter(Boolean).map((image, index) => (
+                <img key={`${image}-${index}`} src={image} alt={`${draft.title} ${index + 1}`} style={S.viewerImage} />
+              ))}
+            </div>
+          )}
+
+          {draft.sourceUrl && (
+            <a href={draft.sourceUrl} target="_blank" rel="noreferrer" style={S.sourceLink}>
+              出典ページを開く
+            </a>
+          )}
+
+          {draft.tags.length > 0 && (
+            <div style={S.tagRow}>{draft.tags.map(tag => <span key={tag} style={S.tag}>{tag}</span>)}</div>
+          )}
+
+          <div style={S.viewerServings}>
+            <span>{draft.servings}人分を</span>
+            <input style={S.servingsInput} type="number" min="1" value={targetServings} onChange={e => setTargetServings(Number(e.target.value || 1))} />
+            <span>人分で表示</span>
+          </div>
+
+          <div style={S.sectionTitle}>材料</div>
+          <div style={S.viewerList}>
+            {draft.ingredients.filter(i => i.name.trim()).map((item, index) => (
+              <div key={index} style={S.viewerIngredient}>
+                <span>{item.name}</span>
+                <strong>{scaleQuantity(item.quantity, draft.servings, targetServings)}{item.unit}</strong>
+                {item.note && <em>{item.note}</em>}
+              </div>
+            ))}
+          </div>
+
+          <div style={S.sectionTitle}>作り方</div>
+          <ol style={S.stepList}>
+            {draft.steps.filter(Boolean).map((step, index) => <li key={index}>{step}</li>)}
+          </ol>
+
+          {draft.notes && (
+            <>
+              <div style={S.sectionTitle}>メモ</div>
+              <div style={S.noteBox}>{draft.notes}</div>
+            </>
+          )}
+
+          <div style={S.sectionTitle}>作った際のメモ</div>
+          <div style={draft.cookMemo ? S.noteBox : S.emptyNote}>{draft.cookMemo || "まだメモはありません"}</div>
+          <div style={S.cookedInfo}>
+            {draft.cookedCount > 0 ? `${draft.cookedCount}回作成 / 最終 ${formatDate(draft.lastCookedAt)}` : "まだ作った記録はありません"}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (draft) {
     return (
@@ -482,6 +568,16 @@ export default function RecipeBook({ user }) {
           <input style={S.input} value={url} onChange={e => setUrl(e.target.value)} placeholder="レシピサイトのURLを貼り付け" />
           <button style={S.primaryMiniBtn} onClick={importFromUrl} disabled={loading}>{loading ? "取得中…" : "取得"}</button>
         </div>
+        <div style={S.searchRow}>
+          <input
+            style={S.input}
+            value={googleQuery}
+            onChange={e => setGoogleQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && openGoogleSearch()}
+            placeholder="例：鶏むね肉 作り置き"
+          />
+          <button style={S.searchBtn} onClick={openGoogleSearch}>Googleで探す</button>
+        </div>
       </div>
 
       <div style={S.filterRow}>
@@ -550,12 +646,14 @@ const S = {
   cardTitle: { fontSize: 13, fontWeight: 700, color: "#2D3748", marginBottom: 8 },
   importCard: { background: "white", borderRadius: 14, padding: 14, marginBottom: 12, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
   importRow: { display: "flex", gap: 8 },
+  searchRow: { display: "flex", gap: 8, marginTop: 8, paddingTop: 8, borderTop: "1px solid #F7FAFC" },
   filterRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
   countText: { marginLeft: "auto", fontSize: 12, color: "#A0AEC0" },
   input: { flex: 1, padding: "9px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", minWidth: 0, boxSizing: "border-box" },
   select: { padding: "9px 10px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 13, background: "white", cursor: "pointer" },
   textarea: { width: "100%", padding: "9px 12px", borderRadius: 9, border: "1.5px solid #E2E8F0", fontSize: 13, outline: "none", resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" },
   primaryMiniBtn: { padding: "9px 13px", borderRadius: 10, background: "#2D3748", color: "white", border: "none", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 },
+  searchBtn: { padding: "9px 13px", borderRadius: 10, background: "#EBF8FF", color: "#2B6CB0", border: "1.5px solid #BEE3F8", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0 },
   primaryBtn: { flex: 1, padding: 12, borderRadius: 11, background: "#2D3748", color: "white", border: "none", fontSize: 14, fontWeight: 700, cursor: "pointer" },
   greenBtn: { flex: 1, padding: 12, borderRadius: 11, background: "#2F855A", color: "white", border: "none", fontSize: 14, fontWeight: 700, cursor: "pointer" },
   deleteBtn: { padding: "12px 14px", borderRadius: 11, border: "1.5px solid #FED7D7", background: "#FFF5F5", color: "#E53E3E", fontSize: 13, fontWeight: 700, cursor: "pointer" },
@@ -581,6 +679,20 @@ const S = {
   empty: { textAlign: "center", color: "#A0AEC0", fontSize: 13, padding: "36px 20px", background: "white", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
   message: { fontSize: 12, color: "#2F855A", background: "#F0FFF4", border: "1px solid #9AE6B4", borderRadius: 9, padding: "8px 10px", marginBottom: 10 },
   backBtn: { background: "none", border: "none", color: "#667eea", fontSize: 13, cursor: "pointer", padding: "0 0 12px", fontWeight: 600 },
+  viewer: { background: "white", borderRadius: 14, padding: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
+  viewerTop: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #EDF2F7" },
+  viewerTitle: { fontSize: 22, fontWeight: 800, color: "#2D3748", lineHeight: 1.35 },
+  viewerMeta: { display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", fontSize: 12, color: "#718096", marginTop: 7 },
+  viewerImageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 12 },
+  viewerImage: { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: 10, background: "#EDF2F7" },
+  sourceLink: { display: "inline-block", fontSize: 12, color: "#667eea", fontWeight: 700, textDecoration: "none", marginBottom: 10 },
+  viewerServings: { display: "flex", alignItems: "center", gap: 7, background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 10, padding: "8px 10px", fontSize: 12, color: "#4A5568", marginTop: 12 },
+  servingsInput: { width: 60, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #E2E8F0", fontSize: 13, boxSizing: "border-box" },
+  viewerList: { display: "flex", flexDirection: "column", gap: 5 },
+  viewerIngredient: { display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 12px", alignItems: "center", background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 9, padding: "8px 10px", fontSize: 13, color: "#2D3748" },
+  stepList: { margin: "0 0 10px", paddingLeft: 22, color: "#4A5568", fontSize: 13, lineHeight: 1.8 },
+  noteBox: { whiteSpace: "pre-wrap", background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 10, padding: 10, fontSize: 13, color: "#4A5568", lineHeight: 1.7 },
+  emptyNote: { background: "#F7FAFC", border: "1px dashed #CBD5E0", borderRadius: 10, padding: 10, fontSize: 12, color: "#A0AEC0", textAlign: "center" },
   editor: { background: "white", borderRadius: 14, padding: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
   editorTop: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
   titleInput: { flex: 1, border: "none", borderBottom: "1.5px solid #E2E8F0", padding: "8px 0", fontSize: 22, fontWeight: 800, color: "#2D3748", outline: "none", minWidth: 0 },

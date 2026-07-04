@@ -52,9 +52,33 @@ function stepsFrom(value) {
   }).filter(Boolean);
 }
 
+function parseIngredientLine(value) {
+  const original = textFrom(value).replace(/^[\s・*●○-]+/, "").trim();
+  if (!original) return null;
+  const text = original.replace(/\s+/g, " ");
+  const number = "[0-9０-９]+(?:[./／][0-9０-９]+)?(?:\\s*[〜~\\-]\\s*[0-9０-９]+(?:[./／][0-9０-９]+)?)?";
+  const countUnits = "g|kg|グラム|ml|mL|cc|L|個|本|枚|袋|束|玉|丁|株|切れ|尾|杯|缶|パック|かけ|片|膳|合";
+  const spoonUnits = "大さじ|小さじ|カップ";
+  const vagueUnits = "適量|少々|ひとつまみ|お好み";
+
+  const spoon = text.match(new RegExp(`^(.+?)\\s*(${spoonUnits})\\s*(${number})(.*)$`));
+  if (spoon) return { name: spoon[1].trim(), quantity: spoon[3].trim(), unit: spoon[2].trim(), note: spoon[4].trim() };
+
+  const trailing = text.match(new RegExp(`^(.+?)\\s*(${number})\\s*(${countUnits})(.*)$`));
+  if (trailing) return { name: trailing[1].trim(), quantity: trailing[2].trim(), unit: trailing[3].trim(), note: trailing[4].trim() };
+
+  const vague = text.match(new RegExp(`^(.+?)\\s*(${vagueUnits})(.*)$`));
+  if (vague) return { name: vague[1].trim(), quantity: "", unit: vague[2].trim(), note: vague[3].trim() };
+
+  const parenthetical = text.match(/^(.+?)\s*[（(]([^）)]+)[）)]$/);
+  if (parenthetical) return { name: parenthetical[1].trim(), quantity: "", unit: "", note: parenthetical[2].trim() };
+
+  return { name: text, quantity: "", unit: "", note: "" };
+}
+
 function ingredientsFrom(value) {
   const items = Array.isArray(value) ? value : value ? [value] : [];
-  return items.map(item => ({ name: textFrom(item), quantity: "", unit: "", note: "" })).filter(i => i.name);
+  return items.map(parseIngredientLine).filter(i => i?.name);
 }
 
 function collectImageUrls(value, urls = []) {
