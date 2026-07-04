@@ -147,6 +147,15 @@ function scaleQuantity(quantity, baseServings, targetServings) {
   return Number.isInteger(scaled) ? String(scaled) : String(Math.round(scaled * 10) / 10);
 }
 
+function formatIngredientAmount(quantity, unit, baseServings, targetServings) {
+  const scaled = scaleQuantity(quantity, baseServings, targetServings);
+  const cleanUnit = String(unit || "").trim();
+  if (!scaled) return cleanUnit;
+  if (!cleanUnit) return scaled;
+  if (["小さじ", "大さじ", "カップ"].includes(cleanUnit)) return `${cleanUnit}${scaled}`;
+  return `${scaled}${cleanUnit}`;
+}
+
 function isMissingRecipeTable(error) {
   const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
   return text.includes("saved_recipes") && (
@@ -408,7 +417,7 @@ export default function RecipeBook({ user }) {
             {draft.ingredients.filter(i => i.name.trim()).map((item, index) => (
               <div key={index} style={S.viewerIngredient}>
                 <span>{item.name}</span>
-                <strong>{scaleQuantity(item.quantity, draft.servings, targetServings)}{item.unit}</strong>
+                <strong>{formatIngredientAmount(item.quantity, item.unit, draft.servings, targetServings)}</strong>
                 {item.note && <em>{item.note}</em>}
               </div>
             ))}
@@ -514,7 +523,7 @@ export default function RecipeBook({ user }) {
             {draft.ingredients.filter(i => i.name.trim()).map((item, index) => (
               <div key={index} style={S.previewLine}>
                 <span>{item.name}</span>
-                <strong>{scaleQuantity(item.quantity, draft.servings, targetServings)}{item.unit}</strong>
+                <strong>{formatIngredientAmount(item.quantity, item.unit, draft.servings, targetServings)}</strong>
               </div>
             ))}
           </div>
