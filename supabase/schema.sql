@@ -50,3 +50,29 @@ create table if not exists settings (
 );
 alter table settings enable row level security;
 create policy "own settings" on settings for all using (auth.uid() = user_id);
+
+-- レシピ集（保存済みレシピ）
+create table if not exists saved_recipes (
+  id             text primary key,
+  user_id        uuid references auth.users(id) on delete cascade not null,
+  title          text not null,
+  genre          text default 'その他',
+  source_type    text default 'manual',
+  source_url     text default '',
+  source_name    text default '',
+  image_url      text default '',
+  servings       numeric default 2,
+  ingredients    jsonb default '[]',
+  steps          jsonb default '[]',
+  notes          text default '',
+  cook_memo      text default '',
+  tags           jsonb default '[]',
+  favorite       boolean default false,
+  cooked_count   integer default 0,
+  last_cooked_at timestamptz,
+  created_at     timestamptz default now(),
+  updated_at     timestamptz default now()
+);
+
+alter table saved_recipes enable row level security;
+create policy "own saved recipes" on saved_recipes for all using (auth.uid() = user_id);

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase.js";
+import RecipeBook from "./RecipeBook.jsx";
 
 const LOCATIONS = {
   fridge:  { label: "冷蔵庫", icon: "🧊", color: "#4A90D9", bg: "#EBF8FF" },
@@ -76,7 +77,7 @@ function Stars({ value, onChange }) {
   );
 }
 
-// view: "pantry" | "results" | "madeRecipes" | "history"
+// view: "recipeBook" | "pantry" | "results" | "madeRecipes" | "history"
 export default function KitchenManager({ user }) {
   const [ingredients, setIngredients] = useState({ fridge:[], freezer:[] });
   const [presets,     setPresets]     = useState(DEFAULT_PRESETS);
@@ -678,7 +679,7 @@ ${mealFormat}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <div style={S.navBtns}>
-              {[["pantry","📦 食材"],["madeRecipes","🍽️ 献立"],["history","📋 履歴"]].map(([v,label])=>(
+              {[["recipeBook","📖 レシピ集"],["pantry","📦 食材"],["madeRecipes","🍽️ 献立"],["history","📋 履歴"]].map(([v,label])=>(
                 <button key={v}
                   style={{...S.navBtn,...((view===v||(v==="pantry"&&view==="results"))?S.navActive:{})}}
                   onClick={()=>{ setView(v); setHistDetail(null); }}>
@@ -692,6 +693,9 @@ ${mealFormat}
       </header>
 
       <main style={S.main}>
+
+        {/* ═══ RECIPE BOOK ═══════════════════════════════════ */}
+        {view==="recipeBook" && <RecipeBook user={user} />}
 
         {/* ═══ PANTRY ═══════════════════════════════════════ */}
         {view==="pantry" && (
