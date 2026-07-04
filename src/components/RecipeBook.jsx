@@ -291,7 +291,7 @@ export default function RecipeBook({ user }) {
   };
 
   const deleteRecipe = async () => {
-    if (!draft?.id || !window.confirm("このレシピを削除しますか？")) return;
+    if (!draft?.id || !window.confirm("削除してよろしいですか？")) return;
     setRecipes(prev => prev.filter(r => r.id !== draft.id));
     setSelected(null);
     setDraft(null);
@@ -466,6 +466,10 @@ export default function RecipeBook({ user }) {
               onClick={() => setDraft({ ...draft, favorite: !draft.favorite })}>
               {draft.favorite ? "★" : "☆"}
             </button>
+            <div style={S.editorActions}>
+              <button style={S.topSaveBtn} onClick={() => saveRecipe()} disabled={saving}>{saving ? "保存中…" : "保存"}</button>
+              {draft.createdAt && <button style={S.topDeleteBtn} onClick={deleteRecipe}>削除</button>}
+            </div>
           </div>
 
           <div style={S.metaGrid}>
@@ -561,9 +565,7 @@ export default function RecipeBook({ user }) {
           </div>
 
           <div style={S.actionRow}>
-            <button style={S.primaryBtn} onClick={() => saveRecipe()} disabled={saving}>{saving ? "保存中…" : "保存"}</button>
             <button style={S.greenBtn} onClick={saveCookMemo} disabled={saving}>作ったメモを残す</button>
-            {draft.createdAt && <button style={S.deleteBtn} onClick={deleteRecipe}>削除</button>}
           </div>
         </div>
       </div>
@@ -719,10 +721,13 @@ const S = {
   noteBox: { whiteSpace: "pre-wrap", background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 10, padding: 10, fontSize: 13, color: "#4A5568", lineHeight: 1.7 },
   emptyNote: { background: "#F7FAFC", border: "1px dashed #CBD5E0", borderRadius: 10, padding: 10, fontSize: 12, color: "#A0AEC0", textAlign: "center" },
   editor: { background: "white", borderRadius: 14, padding: 16, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" },
-  editorTop: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12 },
+  editorTop: { display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" },
   titleInput: { flex: 1, border: "none", borderBottom: "1.5px solid #E2E8F0", padding: "8px 0", fontSize: 22, fontWeight: 800, color: "#2D3748", outline: "none", minWidth: 0 },
   favoriteBtn: { width: 38, height: 38, borderRadius: 12, border: "1.5px solid #E2E8F0", background: "white", color: "#CBD5E0", fontSize: 20, cursor: "pointer" },
   favoriteBtnOn: { color: "#D69E2E", background: "#FFFFF0", borderColor: "#F6E05E" },
+  editorActions: { display: "flex", gap: 6, flexShrink: 0 },
+  topSaveBtn: { padding: "9px 14px", borderRadius: 10, background: "#2D3748", color: "white", border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  topDeleteBtn: { padding: "9px 12px", borderRadius: 10, border: "1.5px solid #FED7D7", background: "#FFF5F5", color: "#E53E3E", fontSize: 13, fontWeight: 700, cursor: "pointer" },
   metaGrid: { display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr", gap: 8, marginBottom: 10 },
   fieldLabel: { display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: "#4A5568", marginBottom: 10 },
   imageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 10 },
