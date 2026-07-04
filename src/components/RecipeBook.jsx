@@ -175,6 +175,7 @@ export default function RecipeBook({ user }) {
   const [url, setUrl] = useState("");
   const [googleQuery, setGoogleQuery] = useState("");
   const [editMode, setEditMode] = useState(false);
+  const [tagText, setTagText] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -244,6 +245,7 @@ export default function RecipeBook({ user }) {
     setSelected(recipe.id || "new");
     setDraft({ ...recipe, imageUrls, imageUrl: imageUrls[0] || "", ingredients: recipe.ingredients.map(i => ({ ...i })), steps: [...recipe.steps], tags: [...recipe.tags] });
     setTargetServings(Number(recipe.servings || 2));
+    setTagText((recipe.tags || []).join(", "));
     setEditMode(Boolean(options.edit));
     setMessage("");
   };
@@ -264,6 +266,7 @@ export default function RecipeBook({ user }) {
       imageUrls: (nextDraft.imageUrls || []).filter(Boolean).slice(0, 3),
       ingredients: nextDraft.ingredients.length ? nextDraft.ingredients : EMPTY_RECIPE.ingredients,
       steps: nextDraft.steps.length ? nextDraft.steps : [""],
+      tags: parseTags(tagText),
     };
     const { error } = await supabase.from("saved_recipes").upsert(toRow(recipe, user.id));
     if (error) {
@@ -504,7 +507,15 @@ export default function RecipeBook({ user }) {
             ))}
           </div>
           <label style={S.fieldLabel}>タグ（カンマ区切り）
-            <input style={S.input} value={draft.tags.join(", ")} onChange={e => setDraft({ ...draft, tags: parseTags(e.target.value) })} placeholder="時短, 鶏肉, 作り置き" />
+            <input
+              style={S.input}
+              value={tagText}
+              onChange={e => {
+                setTagText(e.target.value);
+                setDraft({ ...draft, tags: parseTags(e.target.value) });
+              }}
+              placeholder="時短, 鶏肉, 作り置き"
+            />
           </label>
 
           <div style={S.sectionTitle}>材料</div>
@@ -621,7 +632,11 @@ export default function RecipeBook({ user }) {
         <div style={S.list}>
           {filteredRecipes.map(recipe => (
             <button key={recipe.id} style={S.savedCard} onClick={() => openRecipe(recipe)}>
-              {(recipe.imageUrls?.[0] || recipe.imageUrl) && <img src={recipe.imageUrls?.[0] || recipe.imageUrl} alt="" style={S.savedImage} />}
+              {(recipe.imageUrls?.[0] || recipe.imageUrl) ? (
+                <img src={recipe.imageUrls?.[0] || recipe.imageUrl} alt="" style={S.savedImage} />
+              ) : (
+                <div style={S.savedImageEmpty}>画像なし</div>
+              )}
               <div style={S.savedTop}>
                 <span style={S.genreBadge}>{recipe.genre}</span>
                 <span style={recipe.favorite ? S.starOn : S.starOff}>{recipe.favorite ? "★" : "☆"}</span>
@@ -675,11 +690,12 @@ const S = {
   recipeMeta: { fontSize: 11, color: "#718096", minHeight: 30 },
   saveSmallBtn: { width: "100%", marginTop: 9, padding: 8, borderRadius: 9, background: "#F0FFF4", border: "1.5px solid #9AE6B4", color: "#2F855A", fontSize: 12, fontWeight: 700, cursor: "pointer" },
   list: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 8 },
-  savedCard: { minWidth: 0, textAlign: "left", background: "white", border: "1.5px solid transparent", borderRadius: 12, padding: 9, boxShadow: "0 2px 10px rgba(0,0,0,0.06)", cursor: "pointer" },
+  savedCard: { minWidth: 0, textAlign: "left", background: "white", border: "1.5px solid transparent", borderRadius: 12, padding: 9, boxShadow: "0 2px 10px rgba(0,0,0,0.06)", cursor: "pointer", display: "flex", flexDirection: "column" },
   savedImage: { width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: 9, marginBottom: 7, background: "#F7FAFC" },
-  savedTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  savedTitle: { fontSize: 12, fontWeight: 800, color: "#2D3748", marginBottom: 4, lineHeight: 1.35, overflowWrap: "anywhere" },
-  savedMeta: { fontSize: 10, color: "#A0AEC0", lineHeight: 1.35, overflowWrap: "anywhere" },
+  savedImageEmpty: { width: "100%", aspectRatio: "1 / 1", borderRadius: 9, marginBottom: 7, background: "#F7FAFC", border: "1.5px dashed #CBD5E0", color: "#A0AEC0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 },
+  savedTop: { minHeight: 24, display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  savedTitle: { minHeight: 34, fontSize: 12, fontWeight: 800, color: "#2D3748", marginBottom: 4, lineHeight: 1.35, overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
+  savedMeta: { minHeight: 28, fontSize: 10, color: "#A0AEC0", lineHeight: 1.35, overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
   genreBadge: { display: "inline-block", fontSize: 11, fontWeight: 700, color: "#4A5568", background: "#EDF2F7", borderRadius: 8, padding: "2px 8px" },
   starOn: { color: "#D69E2E", fontSize: 17 },
   starOff: { color: "#CBD5E0", fontSize: 17 },
