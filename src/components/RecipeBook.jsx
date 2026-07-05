@@ -156,6 +156,12 @@ function formatIngredientAmount(quantity, unit, baseServings, targetServings) {
   return `${scaled}${cleanUnit}`;
 }
 
+function scrollToRecipeTop() {
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  });
+}
+
 function isMissingRecipeTable(error) {
   const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
   return text.includes("saved_recipes") && (
@@ -248,6 +254,7 @@ export default function RecipeBook({ user }) {
     setTagText((recipe.tags || []).join(", "));
     setEditMode(Boolean(options.edit));
     setMessage("");
+    scrollToRecipeTop();
   };
 
   const newRecipe = () => {
