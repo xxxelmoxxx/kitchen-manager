@@ -78,3 +78,25 @@ create table if not exists saved_recipes (
 alter table saved_recipes add column if not exists image_urls jsonb default '[]';
 alter table saved_recipes enable row level security;
 create policy "own saved recipes" on saved_recipes for all using (auth.uid() = user_id);
+
+-- レシピ写真（iPhone等から取り込んだ画像）
+-- 公開URLは推測困難なUUIDですが、URLを知っている人は表示できます。
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('recipe-images', 'recipe-images', true, 8388608, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+create policy "own recipe image uploads" on storage.objects
+for insert to authenticated
+with check (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "own recipe image updates" on storage.objects
+for update to authenticated
+using (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = auth.uid()::text)
+with check (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "own recipe image deletes" on storage.objects
+for delete to authenticated
+using (bucket_id = 'recipe-images' and (storage.foldername(name))[1] = auth.uid()::text);

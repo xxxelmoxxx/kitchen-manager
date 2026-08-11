@@ -25,6 +25,8 @@ const DEFAULT_SETTINGS = {
   mealComposition: "full",
   cookingTime:     0,
   fontSize:        "sm",
+  inventoryLastChecked: {},
+  inventoryIntervalDays: { freezer: 14 },
 };
 const FONT_SCALE   = { sm:1, md:1.15, lg:1.3 };
 const AMOUNT_OPTIONS = ["少量","半分","たっぷり"];
@@ -43,6 +45,20 @@ const CATEGORY_MAP = [
 function getCategoryIcon(name) {
   for (const cat of CATEGORY_MAP) if (cat.keys.some(k => name.includes(k))) return cat;
   return { icon:"🫙", color:"#A0AEC0", bg:"#F7FAFC" };
+}
+
+function inventoryStatus(lastChecked, intervalDays) {
+  const days = Number(intervalDays || 14);
+  if (!lastChecked) return { due: true, label: "まだ棚卸していません" };
+  const last = new Date(lastChecked);
+  const next = new Date(last.getTime() + days * 24 * 60 * 60 * 1000);
+  const due = next.getTime() <= Date.now();
+  return {
+    due,
+    label: due
+      ? `棚卸の時期です（前回 ${last.toLocaleDateString("ja-JP")}）`
+      : `前回 ${last.toLocaleDateString("ja-JP")}・次回 ${next.toLocaleDateString("ja-JP")}`,
+  };
 }
 
 function parseComponents(recipe) {
@@ -90,6 +106,10 @@ export default function KitchenManager({ user }) {
   const [inputName,   setInputName]   = useState("");
   const [inputAmount, setInputAmount] = useState("たっぷり");
   const [editingId,   setEditingId]   = useState(null);
+  const [inventoryLoc, setInventoryLoc] = useState(null);
+  const [inventoryChecked, setInventoryChecked] = useState(new Set());
+  const [inventorySaving, setInventorySaving] = useState(false);
+  const [inventoryMessage, setInventoryMessage] = useState("");
 
   const [editPresets, setEditPresets] = useState(false);
   const [presetInput, setPresetInput] = useState("");
@@ -157,7 +177,12 @@ export default function KitchenManager({ user }) {
         madeIndices:r.made_indices||[], madeComponents:r.made_components||null,
       })));
     }
-    if (sRes.data?.data) setSettings({ ...DEFAULT_SETTINGS, ...sRes.data.data });
+    if (sRes.data?.data) setSettings({
+      ...DEFAULT_SETTINGS,
+      ...sRes.data.data,
+      inventoryLastChecked: { ...DEFAULT_SETTINGS.inventoryLastChecked, ...(sRes.data.data.inventoryLastChecked || {}) },
+      inventoryIntervalDays: { ...DEFAULT_SETTINGS.inventoryIntervalDays, ...(sRes.data.data.inventoryIntervalDays || {}) },
+    });
     setDataLoading(false);
   };
 
@@ -174,9 +199,61 @@ export default function KitchenManager({ user }) {
   // ── 設定 ────────────────────────────────────────────
   const saveSettings = async (next) => {
     setSettings(next);
-    await supabase.from("settings").upsert({ user_id:user.id, data:next });
+    return supabase.from("settings").upsert({ user_id:user.id, data:next });
   };
   const updSetting = (key, val) => saveSettings({ ...settings, [key]:val });
+
+  const startInventory = (loc) => {
+    setInventoryLoc(loc);
+    setInventoryChecked(new Set());
+    setInventoryMessage("");
+  };
+
+  const toggleInventoryItem = (id) => {
+    setInventoryChecked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const finishInventory = async () => {
+    if (!inventoryLoc || inventorySaving) return;
+    const items = ingredients[inventoryLoc];
+    const missing = items.filter(item => !inventoryChecked.has(item.id));
+    if (missing.length && !window.confirm(`未確認の${missing.length}品を「在庫なし」として一覧から削除します。よろしいですか？`)) return;
+    setInventorySaving(true);
+    setInventoryMessage("");
+    if (missing.length) {
+      const { error } = await supabase.from("ingredients").delete().in("id", missing.map(item => item.id));
+      if (error) {
+        setInventoryMessage(`棚卸を完了できませんでした: ${error.message}`);
+        setInventorySaving(false);
+        return;
+      }
+      const missingIds = new Set(missing.map(item => item.id));
+      setIngredients(prev => ({ ...prev, [inventoryLoc]: prev[inventoryLoc].filter(item => !missingIds.has(item.id)) }));
+    }
+    const completedAt = new Date().toISOString();
+    const nextSettings = {
+      ...settings,
+      inventoryLastChecked: { ...(settings.inventoryLastChecked || {}), [inventoryLoc]: completedAt },
+    };
+    const { error } = await saveSettings(nextSettings);
+    setInventorySaving(false);
+    if (error) {
+      setInventoryMessage(`在庫は更新しましたが、棚卸日の保存に失敗しました: ${error.message}`);
+      return;
+    }
+    setInventoryMessage(`${LOCATIONS[inventoryLoc].label}の棚卸を完了しました。`);
+    setInventoryLoc(null);
+    setInventoryChecked(new Set());
+  };
+
+  const updateInventoryInterval = (loc, days) => saveSettings({
+    ...settings,
+    inventoryIntervalDays: { ...(settings.inventoryIntervalDays || {}), [loc]: days },
+  });
 
   // ── 魚トラッキング ──────────────────────────────────
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -713,6 +790,81 @@ ${mealFormat}
               <div style={S.statTotalBlock}><div style={S.statTotalNum}>{total}</div><div style={S.statTotalLabel}>合計</div></div>
             </div>
 
+            <div style={S.inventoryCard}>
+              <div style={S.inventoryHeader}>
+                <div>
+                  <div style={S.cardTitle}>❄️ 冷凍庫の定期棚卸</div>
+                  <div style={S.inventoryIntro}>冷凍庫の実物を見ながら、ある物だけにチェックを付けます。</div>
+                </div>
+              </div>
+              <div style={S.inventorySummaryGrid}>
+                {["freezer"].map(loc => {
+                  const cat = LOCATIONS[loc];
+                  const interval = settings.inventoryIntervalDays?.[loc] || 14;
+                  const status = inventoryStatus(settings.inventoryLastChecked?.[loc], interval);
+                  return (
+                    <div key={loc} style={{ ...S.inventorySummary, ...(status.due ? S.inventorySummaryDue : {}) }}>
+                      <div style={S.inventorySummaryTop}>
+                        <strong style={{ color:cat.color }}>{cat.icon} {cat.label}</strong>
+                        {status.due && <span style={S.dueBadge}>要確認</span>}
+                      </div>
+                      <div style={S.inventoryStatusText}>{status.label}</div>
+                      <div style={S.inventoryControls}>
+                        <label style={S.inventoryIntervalLabel}>間隔
+                          <select style={S.inventoryIntervalSelect} value={interval} onChange={e => updateInventoryInterval(loc, Number(e.target.value))}>
+                            <option value={7}>1週間</option>
+                            <option value={14}>2週間</option>
+                            <option value={30}>1か月</option>
+                            <option value={60}>2か月</option>
+                            <option value={90}>3か月</option>
+                          </select>
+                        </label>
+                        <button style={{ ...S.inventoryStartBtn, background:cat.color }} onClick={() => startInventory(loc)}>棚卸する</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {inventoryMessage && <div style={inventoryMessage.includes("失敗") || inventoryMessage.includes("できません") ? S.inventoryError : S.inventorySuccess}>{inventoryMessage}</div>}
+            </div>
+
+            {inventoryLoc && (
+              <div style={S.inventoryWorkCard}>
+                <div style={S.inventoryWorkHeader}>
+                  <div>
+                    <div style={S.inventoryWorkTitle}>{LOCATIONS[inventoryLoc].icon} {LOCATIONS[inventoryLoc].label}を確認</div>
+                    <div style={S.inventoryWorkSub}>見つかった物をタップ。数量もここで直せます。</div>
+                  </div>
+                  <button style={S.inventoryCancelBtn} onClick={() => { setInventoryLoc(null); setInventoryChecked(new Set()); }}>中止</button>
+                </div>
+                {ingredients[inventoryLoc].length === 0 ? (
+                  <div style={S.empty}>登録品はありません。そのまま完了できます。</div>
+                ) : (
+                  <div style={S.inventoryChecklist}>
+                    {ingredients[inventoryLoc].map(item => {
+                      const checked = inventoryChecked.has(item.id);
+                      return (
+                        <div key={item.id} style={{ ...S.inventoryItem, ...(checked ? S.inventoryItemChecked : {}) }}>
+                          <button style={{ ...S.inventoryCheckBtn, ...(checked ? S.inventoryCheckBtnOn : {}) }} onClick={() => toggleInventoryItem(item.id)} aria-pressed={checked}>
+                            {checked ? "✓" : ""}
+                          </button>
+                          <button style={S.inventoryItemName} onClick={() => toggleInventoryItem(item.id)}>{item.name}</button>
+                          <select style={S.inventoryAmountSelect} value={item.amount} onChange={e => updateAmount(inventoryLoc, item.id, e.target.value)}>
+                            {AMOUNT_OPTIONS.map(amount => <option key={amount}>{amount}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={S.inventoryWorkFooter}>
+                  <span style={S.inventoryProgress}>{inventoryChecked.size} / {ingredients[inventoryLoc].length}品を確認</span>
+                  <button style={S.inventoryFinishBtn} onClick={finishInventory} disabled={inventorySaving}>{inventorySaving ? "保存中…" : "棚卸を完了"}</button>
+                </div>
+                <div style={S.inventoryWarning}>未チェックの品は、確認後に一覧から削除されます。</div>
+              </div>
+            )}
+
             <div style={S.card}>
               <div style={S.cardTitle}>食材を追加</div>
               <div style={S.tabRow}>
@@ -1215,6 +1367,38 @@ const S = {
   statTotalBlock:{display:"flex",flexDirection:"column",alignItems:"center",paddingLeft:10,borderLeft:"1px solid #E2E8F0"},
   statTotalNum:{fontSize:20,fontWeight:800,color:"#2D3748"},
   statTotalLabel:{fontSize:9,color:"#A0AEC0"},
+
+  inventoryCard:{background:"white",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
+  inventoryHeader:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8},
+  inventoryIntro:{fontSize:11,color:"#718096",marginTop:-5,marginBottom:10},
+  inventorySummaryGrid:{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8},
+  inventorySummary:{border:"1.5px solid #E2E8F0",borderRadius:11,padding:10,background:"#F7FAFC"},
+  inventorySummaryDue:{borderColor:"#F6AD55",background:"#FFFAF0"},
+  inventorySummaryTop:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,fontSize:13},
+  dueBadge:{fontSize:9,fontWeight:800,color:"#C05621",background:"#FEEBC8",borderRadius:8,padding:"2px 6px"},
+  inventoryStatusText:{fontSize:10,color:"#718096",lineHeight:1.5,minHeight:30,marginTop:5},
+  inventoryControls:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginTop:7,flexWrap:"wrap"},
+  inventoryIntervalLabel:{fontSize:10,color:"#718096",display:"flex",alignItems:"center",gap:4},
+  inventoryIntervalSelect:{fontSize:11,border:"1px solid #CBD5E0",borderRadius:7,padding:"4px 3px",background:"white"},
+  inventoryStartBtn:{border:"none",borderRadius:8,padding:"6px 9px",fontSize:11,fontWeight:700,color:"white",cursor:"pointer"},
+  inventorySuccess:{fontSize:11,color:"#2F855A",background:"#F0FFF4",borderRadius:8,padding:"7px 9px",marginTop:9},
+  inventoryError:{fontSize:11,color:"#C53030",background:"#FFF5F5",borderRadius:8,padding:"7px 9px",marginTop:9},
+  inventoryWorkCard:{background:"white",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 3px 16px rgba(123,104,238,0.16)",border:"2px solid #D6BCFA"},
+  inventoryWorkHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10},
+  inventoryWorkTitle:{fontSize:16,fontWeight:800,color:"#2D3748"},
+  inventoryWorkSub:{fontSize:11,color:"#718096",marginTop:3},
+  inventoryCancelBtn:{border:"1px solid #E2E8F0",borderRadius:8,background:"white",color:"#718096",fontSize:11,padding:"5px 8px",cursor:"pointer"},
+  inventoryChecklist:{display:"flex",flexDirection:"column",gap:6,maxHeight:420,overflowY:"auto",paddingRight:2},
+  inventoryItem:{display:"flex",alignItems:"center",gap:8,border:"1.5px solid #E2E8F0",borderRadius:10,padding:"8px 9px",background:"#F7FAFC"},
+  inventoryItemChecked:{borderColor:"#9AE6B4",background:"#F0FFF4"},
+  inventoryCheckBtn:{width:28,height:28,borderRadius:8,border:"2px solid #CBD5E0",background:"white",color:"white",fontSize:17,fontWeight:800,cursor:"pointer",flexShrink:0},
+  inventoryCheckBtnOn:{background:"#38A169",borderColor:"#38A169"},
+  inventoryItemName:{flex:1,textAlign:"left",border:"none",background:"transparent",fontSize:13,fontWeight:600,color:"#2D3748",cursor:"pointer",padding:"4px 0"},
+  inventoryAmountSelect:{border:"1px solid #CBD5E0",borderRadius:8,padding:"6px 4px",background:"white",fontSize:11},
+  inventoryWorkFooter:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginTop:12},
+  inventoryProgress:{fontSize:12,fontWeight:700,color:"#4A5568"},
+  inventoryFinishBtn:{border:"none",borderRadius:10,padding:"9px 14px",background:"#2F855A",color:"white",fontSize:12,fontWeight:800,cursor:"pointer"},
+  inventoryWarning:{fontSize:10,color:"#C05621",marginTop:7,textAlign:"right"},
 
   card:{background:"white",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 2px 10px rgba(0,0,0,0.06)"},
   cardTitle:{fontSize:14,fontWeight:700,color:"#2D3748",marginBottom:10},

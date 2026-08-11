@@ -3,6 +3,9 @@ import { supabase } from "../lib/supabase.js";
 
 const GENRES = ["和食", "洋食", "中華", "韓国", "エスニック", "副菜", "汁物", "お弁当", "その他"];
 const LOCAL_RECIPE_PREFIX = "ouchi-kitchen:saved-recipes:";
+const RECIPE_IMAGE_BUCKET = "recipe-images";
+const MAX_RECIPE_IMAGES = 3;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const EMPTY_RECIPE = {
   title: "",
@@ -171,6 +174,37 @@ function isMissingRecipeTable(error) {
   );
 }
 
+function storagePathFromPublicUrl(url) {
+  const marker = `/storage/v1/object/public/${RECIPE_IMAGE_BUCKET}/`;
+  const index = String(url || "").indexOf(marker);
+  if (index < 0) return null;
+  return decodeURIComponent(String(url).slice(index + marker.length));
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("画像を読み込めませんでした")); };
+    image.src = url;
+  });
+}
+
+async function compressImage(file) {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} は8MBを超えています`);
+  const image = await loadImage(file);
+  const maxSide = 1600;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (!blob) throw new Error("画像の変換に失敗しました");
+  return blob;
+}
+
 export default function RecipeBook({ user }) {
   const [recipes, setRecipes] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -184,6 +218,7 @@ export default function RecipeBook({ user }) {
   const [tagText, setTagText] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const [message, setMessage] = useState("");
   const localKey = `${LOCAL_RECIPE_PREFIX}${user.id}`;
 
@@ -275,6 +310,7 @@ export default function RecipeBook({ user }) {
       steps: nextDraft.steps.length ? nextDraft.steps : [""],
       tags: parseTags(tagText),
     };
+    const previous = recipes.find(item => item.id === recipe.id);
     const { error } = await supabase.from("saved_recipes").upsert(toRow(recipe, user.id));
     if (error) {
       const saved = saveLocalRecipe(recipe);
@@ -287,6 +323,12 @@ export default function RecipeBook({ user }) {
         : `クラウド保存に失敗したため、この端末に保存しました: ${error.message}`);
     } else {
       const saved = { ...recipe, updatedAt: new Date().toISOString() };
+      const keptUrls = new Set(saved.imageUrls || []);
+      const removedPaths = (previous?.imageUrls || [])
+        .filter(url => !keptUrls.has(url))
+        .map(storagePathFromPublicUrl)
+        .filter(Boolean);
+      if (removedPaths.length) await supabase.storage.from(RECIPE_IMAGE_BUCKET).remove(removedPaths);
       deleteLocalRecipe(saved.id);
       setRecipes(prev => [saved, ...prev.filter(r => r.id !== saved.id)]);
       setDraft(saved);
@@ -299,11 +341,17 @@ export default function RecipeBook({ user }) {
 
   const deleteRecipe = async () => {
     if (!draft?.id || !window.confirm("削除してよろしいですか？")) return;
+    const storagePaths = (draft.imageUrls || []).map(storagePathFromPublicUrl).filter(Boolean);
+    const { error } = await supabase.from("saved_recipes").delete().eq("id", draft.id);
+    if (error && !isMissingRecipeTable(error)) {
+      setMessage(`削除できませんでした: ${error.message}`);
+      return;
+    }
     setRecipes(prev => prev.filter(r => r.id !== draft.id));
     setSelected(null);
     setDraft(null);
     deleteLocalRecipe(draft.id);
-    await supabase.from("saved_recipes").delete().eq("id", draft.id);
+    if (storagePaths.length) await supabase.storage.from(RECIPE_IMAGE_BUCKET).remove(storagePaths);
   };
 
   const saveCookMemo = async () => {
@@ -372,6 +420,47 @@ export default function RecipeBook({ user }) {
       const cleaned = imageUrls.slice(0, 3);
       return { ...prev, imageUrls: cleaned, imageUrl: cleaned.find(Boolean) || "" };
     });
+  };
+
+  const clearImage = (index) => {
+    setImageUrl(index, "");
+  };
+
+  const importPhotos = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    const current = (draft.imageUrls || []).filter(Boolean).slice(0, MAX_RECIPE_IMAGES);
+    const available = MAX_RECIPE_IMAGES - current.length;
+    if (!files.length || available <= 0) {
+      if (available <= 0) setMessage("画像は3枚までです。入れ替える場合は先に画像を削除してください。");
+      return;
+    }
+    setUploadingImages(true);
+    setMessage("");
+    const uploaded = [];
+    try {
+      for (const file of files.slice(0, available)) {
+        const blob = await compressImage(file);
+        const path = `${user.id}/${draft.id || crypto.randomUUID()}/${crypto.randomUUID()}.jpg`;
+        const { error } = await supabase.storage.from(RECIPE_IMAGE_BUCKET).upload(path, blob, {
+          contentType: "image/jpeg",
+          cacheControl: "31536000",
+          upsert: false,
+        });
+        if (error) throw error;
+        const { data } = supabase.storage.from(RECIPE_IMAGE_BUCKET).getPublicUrl(path);
+        uploaded.push(data.publicUrl);
+      }
+      const imageUrls = [...current, ...uploaded].slice(0, MAX_RECIPE_IMAGES);
+      setDraft(prev => ({ ...prev, imageUrls, imageUrl: imageUrls[0] || "" }));
+      setMessage(`${uploaded.length}枚の写真を取り込みました。最後に「保存」を押してください。`);
+    } catch (error) {
+      const uploadedPaths = uploaded.map(storagePathFromPublicUrl).filter(Boolean);
+      if (uploadedPaths.length) await supabase.storage.from(RECIPE_IMAGE_BUCKET).remove(uploadedPaths);
+      setMessage(`写真を取り込めませんでした: ${error.message}。HEICの場合はスクリーンショットまたは「互換性優先」の写真をお試しください。`);
+    } finally {
+      setUploadingImages(false);
+    }
   };
 
   const openGoogleSearch = () => {
@@ -497,6 +586,20 @@ export default function RecipeBook({ user }) {
             <input style={S.input} value={draft.sourceUrl} onChange={e => setDraft({ ...draft, sourceUrl: e.target.value })} placeholder="https://..." />
           </label>
           <div style={S.sectionTitle}>画像</div>
+          <div style={S.photoImportRow}>
+            <label style={{ ...S.photoImportBtn, ...(uploadingImages ? S.photoImportBtnDisabled : {}) }}>
+              {uploadingImages ? "写真を取り込み中…" : "📷 iPhoneの写真から選ぶ"}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={uploadingImages}
+                onChange={importPhotos}
+                style={S.hiddenFileInput}
+              />
+            </label>
+            <span style={S.photoHelp}>最大3枚・自動で軽くして保存します</span>
+          </div>
           <div style={S.imageGrid}>
             {[0, 1, 2].map(index => (
               <div key={index} style={S.imageSlot}>
@@ -512,7 +615,7 @@ export default function RecipeBook({ user }) {
                   placeholder="画像URL"
                 />
                 {draft.imageUrls?.[index] && (
-                  <button style={S.clearImageBtn} onClick={() => setImageUrl(index, "")}>削除</button>
+                  <button style={S.clearImageBtn} onClick={() => clearImage(index)}>削除</button>
                 )}
               </div>
             ))}
@@ -738,6 +841,11 @@ const S = {
   metaGrid: { display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr", gap: 8, marginBottom: 10 },
   fieldLabel: { display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: "#4A5568", marginBottom: 10 },
   imageGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginBottom: 10 },
+  photoImportRow: { display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 9 },
+  photoImportBtn: { display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "9px 13px", borderRadius: 10, background: "#667eea", color: "white", fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  photoImportBtnDisabled: { opacity: 0.55, cursor: "wait" },
+  hiddenFileInput: { position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" },
+  photoHelp: { fontSize: 11, color: "#718096" },
   imageSlot: { background: "#F7FAFC", border: "1px solid #EDF2F7", borderRadius: 11, padding: 8 },
   recipeImage: { width: "100%", aspectRatio: "4 / 3", objectFit: "cover", borderRadius: 9, background: "#EDF2F7", marginBottom: 7 },
   imageEmpty: { width: "100%", aspectRatio: "4 / 3", borderRadius: 9, background: "white", border: "1.5px dashed #CBD5E0", color: "#A0AEC0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, marginBottom: 7 },
